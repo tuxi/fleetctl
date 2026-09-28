@@ -63,6 +63,8 @@ async def cmd_precheck(args):
             print(f"Device {args.udid} not found.")
             return
     
+    collector = DeviceInfoCollector()
+    
     for device in devices:
         udid = device['udid']
         print(f"\n{'='*60}")
@@ -79,12 +81,24 @@ async def cmd_precheck(args):
         if step1_result['details']:
             print(f"  Details: {step1_result['details']}")
         
-        # Step 2: Check if device can enter Setup Assistant offline
+        # Step 2: Check if device can enter Setup Assistant offline (automated)
         print("\n[Step 2/3] Checking Setup Assistant entry (offline)...")
-        step2_result = await check_setup_assistant_offline(udid)
+        step2_raw = await collector.check_setup_assistant_offline_state(udid)
+        # Convert new format to expected format
+        step2_result = {
+            "passed": step2_raw.get("ready", False),
+            "status": step2_raw.get("reason", "unknown"),
+            "details": step2_raw.get("details", {})
+        }
         print(f"  Result: {step2_result['status']}")
         if step2_result['details']:
-            print(f"  Details: {step2_result['details']}")
+            # Print key details
+            details = step2_result['details']
+            if isinstance(details, dict):
+                for k, v in details.items():
+                    print(f"    {k}: {v}")
+            else:
+                print(f"  Details: {details}")
         
         # Step 3: Check USB pairing
         print("\n[Step 3/3] Checking USB pairing...")
@@ -522,7 +536,10 @@ async def cmd_bulk(args):
             operation,
             udids=udids,
             max_concurrent=args.max_concurrent,
-            progress_callback=lambda u, c, t: print(f"  Progress: {c}/{t} - {u[:8]}...") if args.progress else None
+            progress_callback=lambda u, c, t: print(f"  Progress: {c}/{t} - {u[:8]}...") if args.progress else None,
+            use_tqdm=args.progress,
+            tqdm_desc="Detecting devices",
+            resume=args.resume,
         )
         
         if args.json:
@@ -538,6 +555,36 @@ async def cmd_bulk(args):
         if not args.confirm:
             print("ERROR: Wipe operation requires --confirm flag")
             sys.exit(1)
+        
+        # Interactive safety confirmation - mandatory even with --confirm flag
+        print("\n" + "="*60)
+        print("⚠️  WARNING: DESTRUCTIVE OPERATION - DATA WILL BE PERMANENTLY ERASED")
+        print("="*60)
+        print(f"Devices to wipe: {len(udids)}")
+        for d in udids:
+            device_info = next((dev for dev in connected_devices if dev['udid'] == d), {})
+            name = device_info.get('device_name', 'Unknown')
+            model = device_info.get('product_type', 'Unknown')
+            print(f"  - {d[:8]}... ({name}, {model})")
+        print("="*60)
+        print("This will:")
+        print("  • PERMANENTLY DESTROY all data on the device(s)")
+        print("  • Reset device(s) to factory state (Setup Assistant)")
+        print("  • Data CANNOT be recovered (NIST 800-88 Purge)")
+        print("="*60)
+        
+        # Require explicit typed confirmation
+        confirm_text = input('\nType "WIPE" (all caps) to confirm: ').strip()
+        if confirm_text != "WIPE":
+            print("Aborted: confirmation text does not match.")
+            sys.exit(1)
+        
+        print("\nProceeding with wipe in 3 seconds... (Ctrl+C to cancel)")
+        import time
+        for i in range(3, 0, -1):
+            print(f"  {i}...")
+            time.sleep(1)
+        print()
         
         options = WipeOptions(
             method=args.method,
@@ -560,7 +607,10 @@ async def cmd_bulk(args):
         results = await bulk_manager.run_sequential(
             operation,
             udids=udids,
-            progress_callback=lambda u, c, t: print(f"  Progress: {c}/{t} - {u[:8]}...") if args.progress else None
+            progress_callback=lambda u, c, t: print(f"  Progress: {c}/{t} - {u[:8]}...") if args.progress else None,
+            use_tqdm=args.progress,
+            tqdm_desc="Wiping devices",
+            resume=args.resume,
         )
         
         if args.json:
@@ -568,7 +618,9 @@ async def cmd_bulk(args):
         else:
             for udid, result in results.items():
                 if result["success"]:
-                    print(f"  ✓ {udid[:8]}...: {result['message']}")
+                    # result is wrapped in {"success": True, "result": {...}}
+                    inner = result.get("result", {})
+                    print(f"  ✓ {udid[:8]}...: {inner.get('message', 'Success')}")
                 else:
                     print(f"  ✗ {udid[:8]}...: {result.get('error', 'Failed')}")
     
@@ -591,7 +643,10 @@ async def cmd_bulk(args):
             operation,
             udids=udids,
             max_concurrent=args.max_concurrent,
-            progress_callback=lambda u, c, t: print(f"  Progress: {c}/{t} - {u[:8]}...") if args.progress else None
+            progress_callback=lambda u, c, t: print(f"  Progress: {c}/{t} - {u[:8]}...") if args.progress else None,
+            use_tqdm=args.progress,
+            tqdm_desc="Pre-checking devices",
+            resume=args.resume,
         )
         
         if args.json:
@@ -696,6 +751,7 @@ def main():
     bulk_parser.add_argument("--udid", help="Device UDID (optional, runs on all if not specified)")
     bulk_parser.add_argument("--max-concurrent", type=int, default=4, help="Max concurrent operations")
     bulk_parser.add_argument("--progress", action="store_true", help="Show progress")
+    bulk_parser.add_argument("--resume", action="store_true", help="Resume from checkpoint")
     bulk_parser.add_argument("--json", action="store_true", help="Output as JSON")
     # Wipe-specific options
     bulk_parser.add_argument("--confirm", action="store_true", help="Confirm wipe operation (required for wipe)")

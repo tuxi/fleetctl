@@ -286,19 +286,20 @@ class DeviceInfoCollector:
     
     async def collect(self, udid: str) -> "DeviceReport":
         """
-        Collect comprehensive device information using only public APIs.
+        Collect device information using only lockdown public API.
+        Works without pairing, unlocking, or activation (like ideviceinfo).
         """
         if not self._pymobiledevice3_available:
             return self._mock_report(udid)
         
         try:
             from pymobiledevice3.lockdown import create_using_usbmux
-            ld = await create_using_usbmux(serial=udid)
-            vals = ld.all_values or {}
+            lockdown = await create_using_usbmux(serial=udid)
+            vals = lockdown.all_values or {}
             
             report = DeviceReport(udid=udid)
             
-            # Identity
+            # Identity - basic lockdown fields (work without pairing/auth)
             report.serial_number = vals.get("SerialNumber")
             report.product_type = vals.get("ProductType")
             report.product_version = vals.get("ProductVersion")
@@ -322,25 +323,21 @@ class DeviceInfoCollector:
             report.board_id = hw_model
             report.hardware_platform = hw_platform
             
-            # Status
+            # Status - basic lockdown fields
             report.activation_state = vals.get("ActivationState")
             report.password_protected = vals.get("PasswordProtected")
             
-            # Cloud configuration and profiles
-            await self._collect_mobile_config(ld, report)
-            
-            # Resources
-            await self._collect_resources(ld, report)
-            
-            # Apps
-            await self._collect_apps(ld, report)
-            
-            # Unavailable fields (honest reporting)
+            # Pairing status - check via lockdown connection success
             report.unavailable = [
                 "activation_lock",
                 "find_my",
                 "lost_mode",
                 "mdm_enrollment",
+                "cloud_configuration",
+                "profiles",
+                "disk_usage",
+                "battery",
+                "apps",
             ]
             
             return report
@@ -351,97 +348,138 @@ class DeviceInfoCollector:
             report.errors["collection"] = str(e)
             return report
     
-    async def _collect_mobile_config(self, ld, report: "DeviceReport"):
-        """Collect cloud configuration and profile information."""
-        try:
-            from pymobiledevice3.services.mobile_config import MobileConfigService
-            async with MobileConfigService(ld) as mc:
-                # Cloud configuration
-                try:
-                    cc = await asyncio.wait_for(mc.get_cloud_configuration(), timeout=10)
-                    if isinstance(cc, dict):
-                        report.is_supervised = cc.get("IsSupervised")
-                        report.configuration_source = cc.get("ConfigurationSource")
-                        report.cloud_configuration_present = bool(cc)
-                except Exception as e:
-                    report.errors["cloud_configuration"] = str(e)
-                
-                # Profile list
-                try:
-                    pl = await asyncio.wait_for(mc.get_profile_list(), timeout=10)
-                    if isinstance(pl, dict):
-                        manifest = pl.get("ProfileManifest") or {}
-                        meta = pl.get("ProfileMetadata") or {}
-                        profiles = []
-                        for ident, entry in manifest.items():
-                            if isinstance(entry, dict):
-                                desc = entry.get("Description")
-                                if desc is None and isinstance(meta.get(ident), dict):
-                                    desc = meta[ident].get("PayloadDisplayName")
-                                profiles.append({
-                                    "identifier": ident,
-                                    "description": desc,
-                                    "active": entry.get("IsActive"),
-                                })
-                            report.profiles_count = len(profiles)
-                            report.profiles = profiles
-                except Exception as e:
-                    report.errors["profiles"] = str(e)
-        except Exception as e:
-            report.errors["mobile_config"] = str(e)
-    
-    async def _collect_resources(self, ld, report: "DeviceReport"):
-        """Collect device resource information."""
-        # Disk usage
-        try:
-            du = await asyncio.wait_for(
-                ld.get_value(domain="com.apple.disk_usage"), timeout=10
-            )
-            if isinstance(du, dict):
-                keymap = {
-                    "TotalDiskCapacity": "total_disk_capacity",
-                    "TotalDataCapacity": "total_data_capacity",
-                    "TotalDataAvailable": "data_available",
-                    "TotalSystemCapacity": "total_system_capacity",
-                }
-                for src, dst in keymap.items():
-                    if isinstance(du.get(src), int):
-                        setattr(report, dst, du[src])
-        except Exception as e:
-            report.errors["disk_usage"] = str(e)
+    async def check_setup_assistant_offline_state(self, udid: str) -> Dict[str, Any]:
+        """
+        Check if device is in offline Setup Assistant state (before Wi-Fi selection).
         
-        # Battery health
+        Per spec/11 §6.1 Step 2:
+        - Device must be erased and rebooted (in Setup Assistant)
+        - No SIM card inserted
+        - Not connected to Wi-Fi
+        - Cloud configuration not yet pushed (MDM window still open)
+        - ActivationState should be "Unactivated"
+        
+        Returns:
+            dict with keys:
+            - ready: bool - True if all criteria met
+            - reason: str - why not ready (if ready=False)
+            - details: dict - individual check results
+        """
+        if not self._pymobiledevice3_available:
+            return {
+                "ready": False,
+                "reason": "pymobiledevice3_unavailable",
+                "details": {}
+            }
+        
+        try:
+            from pymobiledevice3.lockdown import create_using_usbmux
+            
+            lockdown = await create_using_usbmux(serial=udid)
+            vals = lockdown.all_values or {}
+            
+            details = {}
+            
+            # 1. Check activation state - must be Unactivated (in Setup Assistant)
+            activation_state = vals.get("ActivationState", "")
+            details["activation_state"] = activation_state
+            is_unactivated = activation_state == "Unactivated"
+            details["is_unactivated"] = is_unactivated
+            
+            if not is_unactivated:
+                return {
+                    "ready": False,
+                    "reason": "already_activated" if activation_state in ["Activated", "ActivatedUnlocked"] else "not_in_setup_assistant",
+                    "details": details
+                }
+            
+            # 2. Check SIM status - must be no SIM
+            sim_status = vals.get("SIMSupported", False)
+            sim_status_str = vals.get("SIMSlotStatus", "")
+            iccid = vals.get("ICCID", "")
+            details["sim_supported"] = sim_status
+            details["sim_slot_status"] = sim_status_str
+            details["iccid_present"] = bool(iccid)
+            has_sim = bool(iccid) or (sim_status_str and sim_status_str.lower() != "empty")
+            details["has_sim"] = has_sim
+            
+            if has_sim:
+                return {
+                    "ready": False,
+                    "reason": "sim_present",
+                    "details": details
+                }
+            
+            # 3. Check Wi-Fi connection status
+            wifi_address = vals.get("WiFiAddress", "")
+            wifi_connected = await self._check_wifi_connected(lockdown)
+            
+            details["wifi_address"] = wifi_address
+            details["wifi_connected"] = wifi_connected
+            
+            if wifi_connected:
+                return {
+                    "ready": False,
+                    "reason": "wifi_connected",
+                    "details": details
+                }
+            
+            # 4. Check cloud configuration - should be empty/not present
+            cloud_config_present, cloud_config_ui_complete = await self._check_cloud_config(lockdown)
+            
+            details["cloud_config_present"] = cloud_config_present
+            details["cloud_config_ui_complete"] = cloud_config_ui_complete
+            
+            if cloud_config_present and cloud_config_ui_complete:
+                return {
+                    "ready": False,
+                    "reason": "cloud_config_pushed",
+                    "details": details
+                }
+            
+            # All checks passed
+            details["ready_for_offline_setup"] = True
+            return {
+                "ready": True,
+                "reason": "offline_setup_assistant_ready",
+                "details": details
+            }
+            
+        except Exception as e:
+            logger.exception(f"Setup Assistant offline check failed for {udid}")
+            return {
+                "ready": False,
+                "reason": f"check_failed: {str(e)}",
+                "details": {}
+            }
+    
+    async def _check_wifi_connected(self, lockdown) -> bool:
+        """Check if device is connected to Wi-Fi via DiagnosticsService."""
         try:
             from pymobiledevice3.services.diagnostics import DiagnosticsService
-            async with DiagnosticsService(ld) as diag:
-                allr = await asyncio.wait_for(diag.action("All"), timeout=15)
-            gg = allr.get("GasGauge") if isinstance(allr, dict) else None
-            if isinstance(gg, dict) and gg.get("Status") == "Success":
-                report.battery_cycle_count = gg.get("CycleCount")
-                report.battery_design_capacity = gg.get("DesignCapacity")
-                report.battery_full_charge_capacity = gg.get("FullChargeCapacity")
-        except Exception as e:
-            report.errors["battery"] = str(e)
+            async with DiagnosticsService(lockdown) as diag:
+                wifi_info = await asyncio.wait_for(diag.action("WiFi"), timeout=10)
+                if isinstance(wifi_info, dict):
+                    status = wifi_info.get("Status", "")
+                    if status == "Success":
+                        networks = wifi_info.get("Networks", [])
+                        if networks:
+                            return True
+        except Exception:
+            pass
+        return False
     
-    async def _collect_apps(self, ld, report: "DeviceReport"):
-        """Collect app information."""
+    async def _check_cloud_config(self, lockdown) -> tuple[bool, bool]:
+        """Check cloud configuration status via MobileConfigService."""
         try:
-            from pymobiledevice3.services.installation_proxy import InstallationProxyService
-            apps = await asyncio.wait_for(
-                InstallationProxyService(ld).get_apps(
-                    application_type="Any", calculate_sizes=True
-                ),
-                timeout=30,
-            )
-            report.apps_count = len(apps)
-            report.apps_static_bytes = sum(
-                (a.get("StaticDiskUsage") or 0) for a in apps.values()
-            )
-            report.apps_dynamic_bytes = sum(
-                (a.get("DynamicDiskUsage") or 0) for a in apps.values()
-            )
-        except Exception as e:
-            report.errors["apps"] = str(e)
+            from pymobiledevice3.services.mobile_config import MobileConfigService
+            async with MobileConfigService(lockdown) as mc:
+                cc = await asyncio.wait_for(mc.get_cloud_configuration(), timeout=10)
+                if isinstance(cc, dict) and cc:
+                    return True, cc.get("CloudConfigurationUIComplete", False)
+        except Exception:
+            pass
+        return False, False
     
     def _mock_report(self, udid: str) -> "DeviceReport":
         """Mock report for testing without device."""

@@ -159,7 +159,7 @@ class WipeManager:
             
             # Get device info for certificate
             lockdown = await create_using_usbmux(serial=udid)
-            vals = ld.all_values or {}
+            vals = lockdown.all_values or {}
             
             serial_number = vals.get("SerialNumber", "Unknown")
             product_type = vals.get("ProductType", "Unknown")
@@ -174,7 +174,7 @@ class WipeManager:
             
             # For iOS, the only compliant remote wipe is via MobileConfigService.erase_device
             # This performs a full cryptographic erase (equivalent to NIST 800-88 Purge)
-            async with MobileConfigService(ld) as mc:
+            async with MobileConfigService(lockdown) as mc:
                 if progress_callback:
                     progress_callback(30, "Initiating device erase...")
                 

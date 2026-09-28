@@ -3,6 +3,10 @@ Tests for device_info module.
 """
 
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+import pymobiledevice3.services.diagnostics
+import pymobiledevice3.services.mobile_config
+import pymobiledevice3.lockdown
 from fleetctl.device_info import (
     DeviceInfoCollector,
     DeviceReport,
@@ -61,6 +65,197 @@ class TestDeviceInfoCollector:
         assert report.chip == "A16"
         assert report.ios_version == "17.4.1"
         assert report.product_type == "iPhone15,2"
+
+
+class TestSetupAssistantOfflineState:
+    """Tests for check_setup_assistant_offline_state method."""
+    
+    @pytest.fixture
+    def collector(self):
+        return DeviceInfoCollector()
+    
+    @pytest.mark.asyncio
+    async def test_already_activated(self, collector):
+        """Test device that is already activated."""
+        with patch.object(pymobiledevice3.lockdown, "create_using_usbmux") as mock_create:
+            mock_lockdown = MagicMock()
+            mock_lockdown.all_values = {
+                "ActivationState": "Activated",
+                "SerialNumber": "TEST123",
+            }
+            mock_create.return_value = mock_lockdown
+            
+            result = await collector.check_setup_assistant_offline_state("test-udid")
+            
+            assert result["ready"] is False
+            assert result["reason"] == "already_activated"
+            assert result["details"]["activation_state"] == "Activated"
+            assert result["details"]["is_unactivated"] is False
+    
+    @pytest.mark.asyncio
+    async def test_activated_unlocked(self, collector):
+        """Test device that is activated unlocked."""
+        with patch.object(pymobiledevice3.lockdown, "create_using_usbmux") as mock_create:
+            mock_lockdown = MagicMock()
+            mock_lockdown.all_values = {
+                "ActivationState": "ActivatedUnlocked",
+            }
+            mock_create.return_value = mock_lockdown
+            
+            result = await collector.check_setup_assistant_offline_state("test-udid")
+            
+            assert result["ready"] is False
+            assert result["reason"] == "already_activated"
+    
+    @pytest.mark.asyncio
+    async def test_unactivated_no_sim_no_wifi_no_cloud_config(self, collector):
+        """Test device in ideal offline Setup Assistant state."""
+        with patch.object(pymobiledevice3.lockdown, "create_using_usbmux") as mock_create, \
+             patch.object(pymobiledevice3.services.mobile_config, "MobileConfigService") as mock_mc_class, \
+             patch.object(pymobiledevice3.services.diagnostics, "DiagnosticsService") as mock_diag_class:
+            
+            mock_lockdown = MagicMock()
+            mock_lockdown.all_values = {
+                "ActivationState": "Unactivated",
+                "ICCID": "",
+                "SIMSlotStatus": "empty",
+                "WiFiAddress": "aa:bb:cc:dd:ee:ff",
+            }
+            mock_create.return_value = mock_lockdown
+            
+            # Mock MobileConfigService - no cloud config
+            mock_mc = AsyncMock()
+            mock_mc.get_cloud_configuration.return_value = {}
+            mock_mc_class.return_value.__aenter__.return_value = mock_mc
+            
+            # Mock DiagnosticsService - no WiFi networks
+            mock_diag = AsyncMock()
+            mock_diag.action.return_value = {"Status": "Success", "Networks": []}
+            mock_diag_class.return_value.__aenter__.return_value = mock_diag
+            
+            result = await collector.check_setup_assistant_offline_state("test-udid")
+            
+            assert result["ready"] is True
+            assert result["reason"] == "offline_setup_assistant_ready"
+            assert result["details"]["is_unactivated"] is True
+            assert result["details"]["has_sim"] is False
+            assert result["details"]["wifi_connected"] is False
+            assert result["details"]["cloud_config_present"] is False
+    
+    @pytest.mark.asyncio
+    async def test_unactivated_with_sim(self, collector):
+        """Test device in Setup Assistant but with SIM inserted."""
+        with patch.object(pymobiledevice3.lockdown, "create_using_usbmux") as mock_create:
+            mock_lockdown = MagicMock()
+            mock_lockdown.all_values = {
+                "ActivationState": "Unactivated",
+                "ICCID": "89860012345678901234",
+                "SIMSlotStatus": "ready",
+            }
+            mock_create.return_value = mock_lockdown
+            
+            result = await collector.check_setup_assistant_offline_state("test-udid")
+            
+            assert result["ready"] is False
+            assert result["reason"] == "sim_present"
+            assert result["details"]["has_sim"] is True
+            assert result["details"]["iccid_present"] is True
+    
+    @pytest.mark.asyncio
+    async def test_unactivated_with_wifi(self, collector):
+        """Test device in Setup Assistant but connected to WiFi."""
+        with patch.object(pymobiledevice3.lockdown, "create_using_usbmux") as mock_create, \
+             patch.object(pymobiledevice3.services.mobile_config, "MobileConfigService") as mock_mc_class, \
+             patch.object(pymobiledevice3.services.diagnostics, "DiagnosticsService") as mock_diag_class:
+            
+            mock_lockdown = MagicMock()
+            mock_lockdown.all_values = {
+                "ActivationState": "Unactivated",
+                "ICCID": "",
+                "SIMSlotStatus": "empty",
+                "WiFiAddress": "aa:bb:cc:dd:ee:ff",
+            }
+            mock_create.return_value = mock_lockdown
+            
+            # Mock MobileConfigService - no cloud config
+            mock_mc = AsyncMock()
+            mock_mc.get_cloud_configuration.return_value = {}
+            mock_mc_class.return_value.__aenter__.return_value = mock_mc
+            
+            # Mock DiagnosticsService - WiFi connected
+            mock_diag = AsyncMock()
+            mock_diag.action.return_value = {
+                "Status": "Success", 
+                "Networks": [{"SSID": "TestNetwork", "BSSID": "aa:bb:cc:dd:ee:ff"}]
+            }
+            mock_diag_class.return_value.__aenter__.return_value = mock_diag
+            
+            result = await collector.check_setup_assistant_offline_state("test-udid")
+            
+            assert result["ready"] is False
+            assert result["reason"] == "wifi_connected"
+            assert result["details"]["wifi_connected"] is True
+    
+    @pytest.mark.asyncio
+    async def test_unactivated_with_cloud_config(self, collector):
+        """Test device in Setup Assistant but cloud config already pushed."""
+        with patch.object(pymobiledevice3.lockdown, "create_using_usbmux") as mock_create, \
+             patch.object(pymobiledevice3.services.mobile_config, "MobileConfigService") as mock_mc_class, \
+             patch.object(pymobiledevice3.services.diagnostics, "DiagnosticsService") as mock_diag_class:
+            
+            mock_lockdown = MagicMock()
+            mock_lockdown.all_values = {
+                "ActivationState": "Unactivated",
+                "ICCID": "",
+                "SIMSlotStatus": "empty",
+            }
+            mock_create.return_value = mock_lockdown
+            
+            # Mock MobileConfigService - cloud config present and UI complete
+            mock_mc = AsyncMock()
+            mock_mc.get_cloud_configuration.return_value = {
+                "CloudConfigurationUIComplete": True,
+                "IsSupervised": True,
+            }
+            mock_mc_class.return_value.__aenter__.return_value = mock_mc
+            
+            # Mock DiagnosticsService - no WiFi networks
+            mock_diag = AsyncMock()
+            mock_diag.action.return_value = {"Status": "Success", "Networks": []}
+            mock_diag_class.return_value.__aenter__.return_value = mock_diag
+            
+            result = await collector.check_setup_assistant_offline_state("test-udid")
+            
+            assert result["ready"] is False
+            assert result["reason"] == "cloud_config_pushed"
+            assert result["details"]["cloud_config_present"] is True
+            assert result["details"]["cloud_config_ui_complete"] is True
+    
+    @pytest.mark.asyncio
+    async def test_device_not_found(self, collector):
+        """Test when device is not connected."""
+        from pymobiledevice3.exceptions import DeviceNotFoundError
+        with patch.object(pymobiledevice3.lockdown, "create_using_usbmux") as mock_create:
+            mock_create.side_effect = DeviceNotFoundError("test-udid", "Device not found")
+            
+            result = await collector.check_setup_assistant_offline_state("test-udid")
+            
+            assert result["ready"] is False
+            assert "check_failed" in result["reason"]
+            assert "Device not found" in result["reason"]
+    
+    @pytest.mark.asyncio
+    async def test_pymobiledevice3_unavailable(self, collector):
+        """Test when pymobiledevice3 is not available."""
+        collector._pymobiledevice3_available = False
+        
+        result = await collector.check_setup_assistant_offline_state("test-udid")
+        
+        assert result["ready"] is False
+        assert result["reason"] == "pymobiledevice3_unavailable"
+
+
+# ... rest of the file unchanged
 
 
 class TestDeviceReport:
