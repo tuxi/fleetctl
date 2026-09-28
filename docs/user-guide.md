@@ -131,11 +131,21 @@ fleetctl precheck --confirm --wait 300
 # 单台擦除（需交互式确认）
 fleetctl wipe <UDID> --confirm
 
-# 批量擦除（串行、进度条、断点续传）
-fleetctl bulk wipe --progress --resume --confirm
+# 擦除并写出证书（JSON 或 PDF）
+fleetctl wipe <UDID> --confirm --certificate cert.pdf --certificate-format pdf --company "ACME"
+
+# 批量擦除（串行、进度条、断点续传），每台一份证书
+fleetctl bulk wipe --progress --resume --confirm --certificate-dir ./certs --certificate-format pdf
 ```
 
 **⚠️ 警告**：擦除不可逆，数据永久销毁（NIST 800-88 Purge），Activation Lock 保留。
+
+**擦除证书**（NIST SP 800-88 Rev. 1）：
+- `--certificate PATH` / `--certificate-format {json,pdf}` - 单台证书输出路径与格式
+- `--certificate-dir DIR` - 批量模式：每台设备写 `<UDID>.<fmt>`
+- `--company` - PDF 证书上显示的组织名
+- 证书含：证书 ID、设备信息、擦除方法、时间戳、结果、验证者、SHA-256 完整性哈希
+- PDF 版为正式排版（标题、分区表格、结果横幅、完整性哈希、页脚声明）
 
 ### 4.5 report - 专业报告生成
 

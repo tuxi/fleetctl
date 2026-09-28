@@ -16,7 +16,7 @@ from fleetctl.device_detector import DeviceDetector
 from fleetctl.device_info import DeviceInfoCollector
 from fleetctl.backup_parser import parse_backup, open_manifest_db
 from fleetctl.config_writer import ConfigWriter, CloudConfiguration, create_enterprise_config
-from fleetctl.wipe_manager import WipeManager, WipeOptions, quick_wipe, full_wipe_with_certificate
+from fleetctl.wipe_manager import WipeManager, WipeOptions, quick_wipe, full_wipe_with_certificate, WipeCertificate
 from fleetctl.report_generator import generate_device_report, ReportConfig
 from fleetctl.usb_manager import USBDeviceManager, BulkOperationManager, create_device_manager, DeviceFilter
 from fleetctl.report_generator import ReportGeneratorFactory
@@ -232,6 +232,19 @@ async def cmd_wipe(args):
     
     manager = WipeManager()
     result = await manager.wipe_device(args.udid, options)
+    
+    # Optional: write the wipe certificate (JSON or PDF)
+    cert_path = getattr(args, "certificate", None)
+    if cert_path and result.certificate:
+        fmt = getattr(args, "certificate_format", "json") or "json"
+        try:
+            WipeCertificate.write(
+                result.certificate, cert_path, fmt,
+                organization=getattr(args, "company", None),
+            )
+            print(f"Certificate written: {cert_path} ({fmt})")
+        except Exception as e:
+            print(f"Warning: could not write certificate: {e}", file=sys.stderr)
     
     if args.json:
         result_dict = {
@@ -518,6 +531,27 @@ async def cmd_bulk(args):
             resume=args.resume,
         )
         
+        # Optional: write per-device certificates
+        cert_dir = getattr(args, "certificate_dir", None)
+        if cert_dir:
+            fmt = getattr(args, "certificate_format", "json") or "json"
+            out_dir = Path(cert_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            written = 0
+            for udid, result in results.items():
+                inner = result.get("result") or {}
+                cert = inner.get("certificate")
+                if cert:
+                    try:
+                        WipeCertificate.write(
+                            cert, out_dir / f"{udid}.{fmt}", fmt,
+                            organization=getattr(args, "company", None),
+                        )
+                        written += 1
+                    except Exception as e:
+                        print(f"  Warning: certificate for {udid[:8]}... failed: {e}", file=sys.stderr)
+            print(f"Certificates written: {written} ({fmt}) -> {out_dir}")
+        
         if args.json:
             print(json.dumps(results, indent=2, ensure_ascii=False))
         else:
@@ -607,6 +641,9 @@ def main():
     wipe_parser.add_argument("--disallow-proximity", action="store_true", help="Disallow proximity setup after wipe")
     wipe_parser.add_argument("--no-verify", action="store_false", dest="verify", help="Skip verification after wipe")
     wipe_parser.add_argument("--no-certificate", action="store_true", help="Don't generate wipe certificate")
+    wipe_parser.add_argument("--certificate", metavar="PATH", help="Write the wipe certificate to PATH")
+    wipe_parser.add_argument("--certificate-format", choices=["json", "pdf"], default="json", help="Certificate format (default: json)")
+    wipe_parser.add_argument("--company", help="Organization name shown on the PDF certificate")
     wipe_parser.add_argument("--json", action="store_true", help="Output as JSON")
     
     # precheck command (三步手工门验证)
@@ -662,6 +699,9 @@ def main():
     bulk_parser.add_argument("--disallow-proximity", action="store_true", help="Disallow proximity setup after wipe")
     bulk_parser.add_argument("--no-verify", action="store_false", dest="verify", help="Skip verification after wipe")
     bulk_parser.add_argument("--no-certificate", action="store_true", help="Don't generate wipe certificate")
+    bulk_parser.add_argument("--certificate-dir", metavar="DIR", help="Write per-device wipe certificates into DIR")
+    bulk_parser.add_argument("--certificate-format", choices=["json", "pdf"], default="json", help="Certificate format (default: json)")
+    bulk_parser.add_argument("--company", help="Organization name shown on PDF certificates")
     
     args = parser.parse_args()
     

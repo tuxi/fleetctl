@@ -59,5 +59,6 @@ build/
 test_report.*
 report.*
 precheck_report.*
+wipe_certificate.*
 pc_out.txt
 CHANGELOG.md

@@ -287,9 +287,27 @@ result = await manager.wipe_device("00008101-...", WipeOptions(method="full"))
 ### `WipeCertificate`
 
 ```python
-WipeCertificate.generate(udid, serial_number, product_type, product_version, method, started_at, completed_at, success, verifier="fleetctl") -> str  # JSON
+# Structured certificate
+cert = WipeCertificate.build_certificate(
+    udid=..., serial_number=..., product_type=..., product_version=...,
+    method="full", started_at=..., completed_at=..., success=True, verifier="fleetctl",
+)
+
+# JSON string (backward-compatible)
+WipeCertificate.generate(...) -> str
+
+# PDF bytes (requires reportlab)
+WipeCertificate.generate_pdf(cert, title="Certificate of Data Erasure", organization="ACME") -> bytes
+
+# Write to file: fmt = "json" | "pdf"
+WipeCertificate.write(cert, "cert.pdf", "pdf", organization="ACME") -> Path
+
 WipeCertificate.generate_hash(data) -> str  # SHA-256 hex
 ```
+
+`build_certificate` 返回的 dict 含：`certificate_version`、`standard`、`wipe_method`、`device`（udid/serial_number/product_type/ios_version）、`timestamps`、`result`、`verifier`、`certificate_id`、`hash_algorithm`。
+
+CLI：`wipe --certificate PATH --certificate-format {json,pdf} --company NAME`；`bulk wipe --certificate-dir DIR --certificate-format {json,pdf}`。
 
 ### 便捷函数
 
