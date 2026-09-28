@@ -20,6 +20,13 @@ from fleetctl.wipe_manager import WipeManager, WipeOptions, quick_wipe, full_wip
 from fleetctl.report_generator import generate_device_report, ReportConfig
 from fleetctl.usb_manager import USBDeviceManager, BulkOperationManager, create_device_manager, DeviceFilter
 from fleetctl.report_generator import ReportGeneratorFactory
+from fleetctl.precheck import (
+    run_precheck_steps,
+    generate_precheck_report,
+    step_label,
+    ERASE_GUIDANCE,
+    WAIT_ACK_PROMPT,
+)
 
 
 async def cmd_detect(args):
@@ -43,226 +50,124 @@ async def cmd_list_devices(args):
 
 async def cmd_precheck(args):
     """
-    Three-step manual gateway verification (三步手工门验证).
-    
-    Step 1: Can "Erase All Content and Settings" (抹掉所有内容和设置)
-    Step 2: Offline - Can enter Setup Assistant to Wi-Fi selection screen
-    Step 3: USB pairing works normally
+    Three-step manual gateway pre-check (三步手工门验证) — read-only.
+
+    Step 1: Erase availability (can "Erase All Content and Settings" be used?)
+    Step 2: Offline Setup Assistant (reached the Wi-Fi-before screen)
+    Step 3: USB pairing (lockdown channel healthy)
+
+    This tool never erases or modifies a device. With ``--confirm`` the flow
+    becomes interactive: after Step 1 it prints erase guidance and, with
+    ``--wait <seconds>``, polls until the device reaches the offline Setup
+    Assistant state and re-runs Step 2. Audit reports can be written via
+    ``--report`` / ``--report-format``.
     """
     manager = USBDeviceManager()
     devices = await manager.enumerate()
-    
+
     if not devices:
         print("No devices connected.")
         return
-    
+
     # Filter by UDID if provided
     if args.udid:
-        devices = [d for d in devices if d['udid'] == args.udid]
+        devices = [d for d in devices if d["udid"] == args.udid]
         if not devices:
             print(f"Device {args.udid} not found.")
             return
-    
+
     collector = DeviceInfoCollector()
-    
+    prechecks = []
+    step_index = {"erase_available": 1, "setup_assistant_offline": 2, "usb_pairing": 3}
+
     for device in devices:
-        udid = device['udid']
-        print(f"\n{'='*60}")
+        udid = device["udid"]
+        print(f"\n{'=' * 60}")
         print(f"Pre-check for device: {udid}")
         print(f"  Name: {device.get('device_name', 'Unknown')}")
         print(f"  Model: {device.get('product_type', 'Unknown')}")
         print(f"  iOS: {device.get('product_version', 'Unknown')}")
-        print(f"{'='*60}")
-        
-        # Step 1: Check if "Erase All Content and Settings" is available
-        print("\n[Step 1/3] Checking 'Erase All Content and Settings' availability...")
-        step1_result = await check_erase_availability(udid)
-        print(f"  Result: {step1_result['status']}")
-        if step1_result['details']:
-            print(f"  Details: {step1_result['details']}")
-        
-        # Step 2: Check if device can enter Setup Assistant offline (automated)
-        print("\n[Step 2/3] Checking Setup Assistant entry (offline)...")
-        step2_raw = await collector.check_setup_assistant_offline_state(udid)
-        # Convert new format to expected format
-        step2_result = {
-            "passed": step2_raw.get("ready", False),
-            "status": step2_raw.get("reason", "unknown"),
-            "details": step2_raw.get("details", {})
-        }
-        print(f"  Result: {step2_result['status']}")
-        if step2_result['details']:
-            # Print key details
-            details = step2_result['details']
+        print(f"{'=' * 60}")
+
+        def _show_step(name, res):
+            idx = step_index[name]
+            print(f"\n[Step {idx}/3] Checking {name.replace('_', ' ')}...")
+            print(f"  Result: {res.get('status', 'unknown')}")
+            details = res.get("details")
             if isinstance(details, dict):
                 for k, v in details.items():
                     print(f"    {k}: {v}")
-            else:
+            elif details:
                 print(f"  Details: {details}")
-        
-        # Step 3: Check USB pairing
-        print("\n[Step 3/3] Checking USB pairing...")
-        step3_result = await check_usb_pairing(udid)
-        print(f"  Result: {step3_result['status']}")
-        if step3_result['details']:
-            print(f"  Details: {step3_result['details']}")
-        
+
+        result = await run_precheck_steps(udid, collector, device, on_step=_show_step)
+        steps = result["steps"]
+
+        # Step 1 guidance: if erase is available but we are not yet in the
+        # offline Setup Assistant window, guide the operator and optionally wait.
+        if steps["erase_available"]["passed"] and not steps["setup_assistant_offline"]["passed"]:
+            _print_erase_guidance()
+            if getattr(args, "confirm", False):
+                answer = input(WAIT_ACK_PROMPT).strip().upper()
+                if answer == "READY" and getattr(args, "wait", 0) > 0:
+                    print(f"  Polling up to {args.wait}s for the offline Setup Assistant state...")
+                    if await _wait_for_offline_setup_assistant(collector, udid, args.wait):
+                        raw2 = await collector.check_setup_assistant_offline_state(udid)
+                        steps["setup_assistant_offline"] = {
+                            "passed": bool(raw2.get("ready", False)),
+                            "status": raw2.get("reason", "unknown"),
+                            "details": raw2.get("details", {}),
+                        }
+                        _show_step("setup_assistant_offline", steps["setup_assistant_offline"])
+                        result["overall_passed"] = all(s["passed"] for s in steps.values())
+                    else:
+                        print("  Timed out waiting for the offline Setup Assistant state.")
+
         # Summary
-        all_passed = all(r['passed'] for r in [step1_result, step2_result, step3_result])
-        print(f"\n{'='*60}")
-        print(f"PRE-CHECK SUMMARY: {'PASSED' if all_passed else 'FAILED'}")
-        print(f"{'='*60}")
-        print(f"  Step 1 (Erase Available): {'✓' if step1_result['passed'] else '✗'}")
-        print(f"  Step 2 (Setup Assistant): {'✓' if step2_result['passed'] else '✗'}")
-        print(f"  Step 3 (USB Pairing):     {'✓' if step3_result['passed'] else '✗'}")
-        
+        overall = result["overall_passed"]
+        print(f"\n{'=' * 60}")
+        print(f"PRE-CHECK SUMMARY: {'PASSED' if overall else 'FAILED'}")
+        print(f"{'=' * 60}")
+        for key in ["erase_available", "setup_assistant_offline", "usb_pairing"]:
+            mark = "[OK]" if steps[key]["passed"] else "[FAIL]"
+            print(f"  {step_label(key):<26} {mark}")
+
+        prechecks.append(result)
+
         if args.json:
-            result = {
-                "udid": udid,
-                "device_name": device.get('device_name'),
-                "product_type": device.get('product_type'),
-                "product_version": device.get('product_version'),
-                "steps": {
-                    "erase_available": step1_result,
-                    "setup_assistant_offline": step2_result,
-                    "usb_pairing": step3_result,
-                },
-                "overall_passed": all_passed,
-            }
             print(json.dumps(result, indent=2, ensure_ascii=False))
 
-
-async def check_erase_availability(udid: str) -> dict:
-    """Step 1: Check if 'Erase All Content and Settings' is available."""
-    try:
-        from pymobiledevice3.lockdown import create_using_usbmux
-        from pymobiledevice3.services.mobile_config import MobileConfigService
-        
-        lockdown = await create_using_usbmux(serial=udid)
-        vals = lockdown.all_values or {}
-        
-        # Check activation state - if already in Setup Assistant, erase is available
-        activation_state = vals.get("ActivationState", "")
-        
-        # Check if device is supervised (MDM may restrict erase)
-        is_supervised = False
-        try:
-            async with MobileConfigService(ld) as mc:
-                cc = await mc.get_cloud_configuration()
-                if isinstance(cc, dict):
-                    is_supervised = cc.get("IsSupervised", False)
-        except Exception:
-            pass
-        
-        # Check for passcode - if passcode set, erase requires passcode
-        password_protected = vals.get("PasswordProtected", False)
-        
-        # Determine availability
-        if activation_state in ["Unactivated", "ActivatedUnlocked"]:
-            # Device is in Setup Assistant or unlocked - erase available
-            return {
-                "passed": True,
-                "status": "AVAILABLE",
-                "details": f"Activation state: {activation_state}, Supervised: {is_supervised}, Passcode: {password_protected}"
-            }
-        elif activation_state == "Activated":
-            # Device is activated - erase available but requires passcode if set
-            if password_protected:
-                return {
-                    "passed": True,
-                    "status": "AVAILABLE_WITH_PASSCODE",
-                    "details": f"Activation state: {activation_state}, Passcode required"
-                }
-            return {
-                "passed": True,
-                "status": "AVAILABLE",
-                "details": f"Activation state: {activation_state}"
-            }
-        else:
-            return {
-                "passed": False,
-                "status": "UNAVAILABLE",
-                "details": f"Activation state: {activation_state} - device may be in recovery/DFU mode"
-            }
-    except Exception as e:
-        return {
-            "passed": False,
-            "status": "ERROR",
-            "details": f"Failed to check: {e}"
-        }
+    # Audit report (JSON / HTML)
+    report_path = getattr(args, "report", None)
+    if report_path:
+        fmt = getattr(args, "report_format", "json") or "json"
+        content = generate_precheck_report(
+            prechecks,
+            format=fmt,
+            title=getattr(args, "title", "fleetctl Pre-check Audit Report"),
+            company_name=getattr(args, "company", None),
+        )
+        Path(report_path).write_bytes(content)
+        print(f"\nAudit report written: {report_path} ({fmt})")
 
 
-async def check_setup_assistant_offline(udid: str) -> dict:
-    """Step 2: Check if device can enter Setup Assistant offline (to Wi-Fi screen)."""
-    try:
-        from pymobiledevice3.lockdown import create_using_usbmux
-        
-        lockdown = await create_using_usbmux(serial=udid)
-        vals = lockdown.all_values or {}
-        
-        activation_state = vals.get("ActivationState", "")
-        
-        # If already in Setup Assistant (Unactivated), we can proceed to Wi-Fi screen
-        if activation_state == "Unactivated":
-            return {
-                "passed": True,
-                "status": "IN_SETUP_ASSISTANT",
-                "details": "Device is already in Setup Assistant (Unactivated state)"
-            }
-        
-        # If activated, we need to check if we can erase and re-enter Setup Assistant
-        # This is a manual step - user needs to erase and verify
-        if activation_state == "Activated":
-            return {
-                "passed": True,
-                "status": "REQUIRES_MANUAL_VERIFICATION",
-                "details": "Device is activated. User must manually: 1) Erase All Content and Settings, 2) Verify Setup Assistant reaches Wi-Fi screen offline"
-            }
-        
-        return {
-            "passed": False,
-            "status": "CANNOT_VERIFY",
-            "details": f"Activation state: {activation_state} - cannot verify Setup Assistant entry"
-        }
-    except Exception as e:
-        return {
-            "passed": False,
-            "status": "ERROR",
-            "details": f"Failed to check: {e}"
-        }
+def _print_erase_guidance():
+    print("\n" + "-" * 60)
+    print("NEXT: manual erase on the device (fleetctl does not erase devices).")
+    print(ERASE_GUIDANCE)
+    print("-" * 60)
 
 
-async def check_usb_pairing(udid: str) -> dict:
-    """Step 3: Check USB pairing works normally."""
-    try:
-        from pymobiledevice3.lockdown import create_using_usbmux
-        
-        # Try to create lockdown connection
-        lockdown = await create_using_usbmux(serial=udid)
-        vals = lockdown.all_values or {}
-        
-        # If we got here, USB pairing works
-        device_name = vals.get("DeviceName", "Unknown")
-        product_type = vals.get("ProductType", "Unknown")
-        
-        return {
-            "passed": True,
-            "status": "PAIRED",
-            "details": f"USB pairing working. Device: {device_name} ({product_type})"
-        }
-    except Exception as e:
-        error_msg = str(e).lower()
-        if "pair" in error_msg or "trust" in error_msg:
-            return {
-                "passed": False,
-                "status": "NOT_PAIRED",
-                "details": f"Device not paired/trusted: {e}"
-            }
-        return {
-            "passed": False,
-            "status": "ERROR",
-            "details": f"USB connection failed: {e}"
-        }
+async def _wait_for_offline_setup_assistant(collector, udid, timeout, interval=5.0):
+    """Poll until the device reaches the offline Setup Assistant state."""
+    import time as _time
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        raw = await collector.check_setup_assistant_offline_state(udid)
+        if raw.get("ready"):
+            return True
+        await asyncio.sleep(interval)
+    return False
 
 
 async def cmd_parse_backup(args):
@@ -625,19 +530,10 @@ async def cmd_bulk(args):
                     print(f"  ✗ {udid[:8]}...: {result.get('error', 'Failed')}")
     
     elif args.operation == "precheck":
+        precheck_collector = DeviceInfoCollector()
+
         async def operation(udid):
-            step1 = await check_erase_availability(udid)
-            step2 = await check_setup_assistant_offline(udid)
-            step3 = await check_usb_pairing(udid)
-            all_passed = all(r['passed'] for r in [step1, step2, step3])
-            return {
-                "steps": {
-                    "erase_available": step1,
-                    "setup_assistant_offline": step2,
-                    "usb_pairing": step3,
-                },
-                "overall_passed": all_passed,
-            }
+            return await run_precheck_steps(udid, precheck_collector)
         
         results = await bulk_manager.run_on_all(
             operation,
@@ -717,6 +613,12 @@ def main():
     precheck_parser = subparsers.add_parser("precheck", help="Three-step manual gateway verification (三步手工门验证)")
     precheck_parser.add_argument("--udid", help="Device UDID (optional, checks all if not specified)")
     precheck_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    precheck_parser.add_argument("--confirm", action="store_true", help="Enable interactive guided erase flow (prompts for READY)")
+    precheck_parser.add_argument("--wait", type=int, default=0, metavar="SECONDS", help="With --confirm: poll up to SECONDS for the offline Setup Assistant state")
+    precheck_parser.add_argument("--report", metavar="PATH", help="Write an audit report to PATH")
+    precheck_parser.add_argument("--report-format", choices=["json", "html"], default="json", help="Audit report format (default: json)")
+    precheck_parser.add_argument("--title", default="fleetctl Pre-check Audit Report", help="Audit report title")
+    precheck_parser.add_argument("--company", help="Company name for the audit report")
     
     # report command
     report_parser = subparsers.add_parser("report", help="Generate device report")
@@ -765,26 +667,49 @@ def main():
     
     # Run async command
     if args.command == "detect":
-        asyncio.run(cmd_detect(args))
+        _run(cmd_detect(args))
     elif args.command == "list":
-        asyncio.run(cmd_list_devices(args))
+        _run(cmd_list_devices(args))
     elif args.command == "precheck":
-        asyncio.run(cmd_precheck(args))
+        _run(cmd_precheck(args))
     elif args.command == "parse-backup":
-        asyncio.run(cmd_parse_backup(args))
+        _run(cmd_parse_backup(args))
     elif args.command == "wipe":
-        asyncio.run(cmd_wipe(args))
+        _run(cmd_wipe(args))
     elif args.command == "report":
-        asyncio.run(cmd_report(args))
+        _run(cmd_report(args))
     elif args.command == "filter":
-        asyncio.run(cmd_filter(args))
+        _run(cmd_filter(args))
     elif args.command == "bulk":
-        asyncio.run(cmd_bulk(args))
+        _run(cmd_bulk(args))
     elif args.command == "monitor":
-        asyncio.run(cmd_monitor(args))
+        _run(cmd_monitor(args))
     else:
         parser.print_help()
         sys.exit(1)
+
+
+def _quiet_asyncio_exceptions(loop, context):
+    """Suppress benign, noisy asyncio warnings from best-effort probes.
+
+    Opening an optional lockdown service (e.g. MobileConfigService) on a device
+    state where it is unavailable raises inside pymobiledevice3, which can leave
+    an internal Future whose exception is never retrieved. We already catch and
+    report the underlying condition, so the GC-time "never retrieved" warning is
+    just noise. Everything else goes to the default handler.
+    """
+    message = context.get("message", "")
+    if "never retrieved" in message:
+        return
+    loop.default_exception_handler(context)
+
+
+def _run(coro):
+    """Run a CLI coroutine with a quieter asyncio exception handler."""
+    async def _main():
+        asyncio.get_running_loop().set_exception_handler(_quiet_asyncio_exceptions)
+        return await coro
+    return asyncio.run(_main())
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@
 - [设备检测 (device_detector)](#设备检测-device_detector)
 - [设备信息采集 (device_info)](#设备信息采集-device_info)
 - [USB/批量管理 (usb_manager)](#usb批量管理-usb_manager)
+- [预检 (precheck)](#预检-precheck)
 - [擦除管理 (wipe_manager)](#擦除管理-wipe_manager)
 - [配置写入 (config_writer)](#配置写入-config_writer)
 - [报告生成 (report_generator)](#报告生成-report_generator)
@@ -203,6 +204,50 @@ DeviceFilter.by_storage(devices, min_free_gb=10, max_used_percent=80)
 ### `async create_device_manager() -> USBDeviceManager`
 
 创建并启动监控的管理器。
+
+---
+
+## 预检 (precheck)
+
+只读三步手工门预检（spec/11 §6.1）。**不修改设备、不执行擦除、不做任何 enrollment 或 Remote Management 绕过。**
+
+```python
+from fleetctl.precheck import run_precheck_steps, generate_precheck_report
+from fleetctl.device_info import DeviceInfoCollector
+
+collector = DeviceInfoCollector()
+result = await run_precheck_steps("00008101-...", collector, device_info={"device_name": "iPhone"})
+print(result["overall_passed"])
+```
+
+| 函数 | 说明 |
+|------|------|
+| `async check_erase_availability(udid) -> dict` | Step 1：擦除可用性 |
+| `async check_usb_pairing(udid) -> dict` | Step 3：USB 配对 |
+| `async run_precheck_steps(udid, collector, device_info=None, check_step1=None, check_step3=None, on_step=None) -> dict` | 跑完 1/2/3（Step 2 用 `collector.check_setup_assistant_offline_state`）；`on_step(name, result)` 回调用于进度 |
+| `format_precheck_text(result) -> str` | 人类可读文本 |
+| `generate_precheck_report(prechecks, format="json", title=..., company_name=None) -> bytes` | 审计报告（json/html） |
+| `ERASE_GUIDANCE` / `WAIT_ACK_PROMPT` / `PRECHECK_SCHEMA_VERSION` | 常量 |
+
+**`run_precheck_steps` 返回**：
+
+```python
+{
+    "udid": str,
+    "device_name": str | None,
+    "product_type": str | None,
+    "product_version": str | None,
+    "steps": {
+        "erase_available": {"passed": bool, "status": str, "details": ...},
+        "setup_assistant_offline": {"passed": bool, "status": str, "details": dict},
+        "usb_pairing": {"passed": bool, "status": str, "details": ...},
+    },
+    "overall_passed": bool,
+    "checked_at": str,   # ISO-8601 Z
+}
+```
+
+CLI（`fleetctl precheck`）：`--udid` / `--json` / `--confirm` / `--wait SECONDS` / `--report PATH` / `--report-format {json,html}` / `--title` / `--company`。
 
 ---
 

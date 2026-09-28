@@ -101,14 +101,29 @@ fleetctl list [--json]
 ### 4.3 precheck - 三步手工门验证
 
 ```bash
+# 只读预检（单台 / 全部）
 fleetctl precheck [--udid UDID] [--json]
-fleetctl bulk precheck [--udid UDID] [--progress] [--resume] [--json]
+
+# 输出可审计报告（JSON / HTML）
+fleetctl precheck --report audit.json --report-format json --company "ACME"
+fleetctl precheck --report audit.html --report-format html --title "巡检报告"
+
+# 交互式引导：若 Step 2 未通过，打印擦除指引并等待进入 Setup Assistant
+fleetctl precheck --confirm --wait 300
 ```
 
-**三步检查**：
+**三步检查**（只读，绝不修改设备）：
 1. 擦除可用性 - 检查 ActivationState、锁屏密码、监管状态
 2. 离线 Setup Assistant - 检查能否离线进入 Wi-Fi 选择前界面
 3. USB 配对 - 验证 USB 连接和配对信任关系
+
+**选项**：
+- `--confirm` - 启用交互式引导流程（Step 2 未通过时打印手动擦除指引，并提示输入 `READY`）
+- `--wait SECONDS` - 配合 `--confirm`：轮询等待设备进入离线 Setup Assistant 状态，最长 SECONDS 秒
+- `--report PATH` / `--report-format {json,html}` - 输出审计报告
+- `--title` / `--company` - 报告标题与公司名
+
+> `fleetctl` **不执行擦除**。抹机是设备上的手动操作（设置 → 通用 → 传输或还原 iPhone → 抹掉所有内容和设置）；本命令只做只读判定与引导。
 
 ### 4.4 wipe - 合规擦除
 
