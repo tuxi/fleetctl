@@ -47,3 +47,15 @@ htmlcov/
 
 # Build artifacts
 fleetctl.egg-info/
+dist/
+build/
+*.dmg
+*.msi
+*.AppImage
+*.wxs
+*.wixobj
+
+# Generated reports
+test_report.*
+report.*
+CHANGELOG.md
