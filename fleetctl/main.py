@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -220,8 +221,55 @@ async def cmd_parse_backup(args):
             print(f"  Errors: {summary.errors}")
 
 
+def _confirm_wipe(devices):
+    """Interactive typed confirmation for a destructive wipe. True = proceed."""
+    print("\n" + "=" * 60)
+    print("WARNING: DESTRUCTIVE OPERATION - DATA WILL BE PERMANENTLY ERASED")
+    print("=" * 60)
+    print(f"Devices to wipe: {len(devices)}")
+    for d in devices:
+        udid = str(d.get("udid", ""))
+        name = d.get("device_name") or "Unknown"
+        model = d.get("product_type") or "Unknown"
+        print(f"  - {udid[:8]}... ({name}, {model})")
+    print("=" * 60)
+    print("This will:")
+    print("  - PERMANENTLY DESTROY all data on the device(s)")
+    print("  - Reset device(s) to factory state (Setup Assistant)")
+    print("  - Data CANNOT be recovered (NIST 800-88 Purge)")
+    print("=" * 60)
+    answer = input('\nType "WIPE" (all caps) to confirm: ').strip()
+    if answer != "WIPE":
+        print("Aborted: confirmation text does not match.")
+        return False
+    print("\nProceeding with wipe in 3 seconds... (Ctrl+C to cancel)")
+    for i in range(3, 0, -1):
+        print(f"  {i}...")
+        time.sleep(1)
+    print()
+    return True
+
+
 async def cmd_wipe(args):
-    """Wipe device."""
+    """Wipe a single device (destructive; requires --confirm + typed confirmation)."""
+    if not getattr(args, "confirm", False):
+        print("ERROR: Wipe is destructive and requires --confirm", file=sys.stderr)
+        sys.exit(1)
+
+    # Best-effort device info for the confirmation prompt
+    device_info = {"udid": args.udid}
+    try:
+        usb_manager = USBDeviceManager()
+        for d in await usb_manager.enumerate():
+            if d.get("udid") == args.udid:
+                device_info = d
+                break
+    except Exception:
+        pass
+
+    if not _confirm_wipe([device_info]):
+        sys.exit(1)
+
     options = WipeOptions(
         method=args.method,
         preserve_data_plan=args.preserve_data_plan,
@@ -475,34 +523,8 @@ async def cmd_bulk(args):
             sys.exit(1)
         
         # Interactive safety confirmation - mandatory even with --confirm flag
-        print("\n" + "="*60)
-        print("⚠️  WARNING: DESTRUCTIVE OPERATION - DATA WILL BE PERMANENTLY ERASED")
-        print("="*60)
-        print(f"Devices to wipe: {len(udids)}")
-        for d in udids:
-            device_info = next((dev for dev in connected_devices if dev['udid'] == d), {})
-            name = device_info.get('device_name', 'Unknown')
-            model = device_info.get('product_type', 'Unknown')
-            print(f"  - {d[:8]}... ({name}, {model})")
-        print("="*60)
-        print("This will:")
-        print("  • PERMANENTLY DESTROY all data on the device(s)")
-        print("  • Reset device(s) to factory state (Setup Assistant)")
-        print("  • Data CANNOT be recovered (NIST 800-88 Purge)")
-        print("="*60)
-        
-        # Require explicit typed confirmation
-        confirm_text = input('\nType "WIPE" (all caps) to confirm: ').strip()
-        if confirm_text != "WIPE":
-            print("Aborted: confirmation text does not match.")
+        if not _confirm_wipe(connected_devices):
             sys.exit(1)
-        
-        print("\nProceeding with wipe in 3 seconds... (Ctrl+C to cancel)")
-        import time
-        for i in range(3, 0, -1):
-            print(f"  {i}...")
-            time.sleep(1)
-        print()
         
         options = WipeOptions(
             method=args.method,
@@ -641,6 +663,7 @@ def main():
     wipe_parser.add_argument("--disallow-proximity", action="store_true", help="Disallow proximity setup after wipe")
     wipe_parser.add_argument("--no-verify", action="store_false", dest="verify", help="Skip verification after wipe")
     wipe_parser.add_argument("--no-certificate", action="store_true", help="Don't generate wipe certificate")
+    wipe_parser.add_argument("--confirm", action="store_true", help="Required: acknowledge the destructive wipe (then type WIPE)")
     wipe_parser.add_argument("--certificate", metavar="PATH", help="Write the wipe certificate to PATH")
     wipe_parser.add_argument("--certificate-format", choices=["json", "pdf"], default="json", help="Certificate format (default: json)")
     wipe_parser.add_argument("--company", help="Organization name shown on the PDF certificate")

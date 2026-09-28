@@ -140,6 +140,8 @@ fleetctl bulk wipe --progress --resume --confirm --certificate-dir ./certs --cer
 
 **⚠️ 警告**：擦除不可逆，数据永久销毁（NIST 800-88 Purge），Activation Lock 保留。
 
+**安全确认**：单台与批量擦除都必须 `--confirm`，随后在终端**手动输入 `WIPE`**（全大写）并等待 3 秒倒计时，才会真正执行。
+
 **擦除证书**（NIST SP 800-88 Rev. 1）：
 - `--certificate PATH` / `--certificate-format {json,pdf}` - 单台证书输出路径与格式
 - `--certificate-dir DIR` - 批量模式：每台设备写 `<UDID>.<fmt>`
