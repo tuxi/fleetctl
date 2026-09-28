@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Create as draft release"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ---------------------------------------------------------------- #
+  # 1. Build Python distributions                                     #
+  # ---------------------------------------------------------------- #
+  build-python:
+    name: Build Python distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build
+        run: |
+          pip install build
+          python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-python
+          path: dist/*
+
+  # ---------------------------------------------------------------- #
+  # 2. Build standalone binaries per platform                         #
+  # ---------------------------------------------------------------- #
+  build-binary-macos:
+    name: Build macOS binary + .dmg
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install
+        run: pip install -e ".[dev,pdf]" pyinstaller
+      - name: Build binary
+        run: make binary
+      - name: Build DMG
+        run: bash scripts/package-macos.sh "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: dist/*.dmg
+
+  build-binary-linux:
+    name: Build Linux binary + .AppImage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install
+        run: pip install -e ".[dev,pdf]" pyinstaller
+      - name: Build binary
+        run: make binary
+      - name: Build AppImage
+        run: bash scripts/package-linux.sh "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: dist/*.AppImage
+
+  build-binary-windows:
+    name: Build Windows binary + .msi
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install
+        run: pip install -e ".[dev,pdf]" pyinstaller
+      - name: Build binary
+        run: pyinstaller --clean --noconfirm --name fleetctl --onefile --console --collect-all pymobiledevice3 fleetctl/main.py
+      - name: Build MSI
+        shell: pwsh
+        run: ./scripts/package-windows.ps1 -Version "${{ github.ref_name }}".Replace("v","")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: dist/*
+
+  # ---------------------------------------------------------------- #
+  # 3. Publish GitHub Release                                         #
+  # ---------------------------------------------------------------- #
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-python, build-binary-macos, build-binary-linux, build-binary-windows]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: List assets
+        run: ls -la release-assets/
+      - name: Generate changelog
+        id: changelog
+        run: |
+          {
+            echo "## What's Changed"
+            git log --pretty=format:'- %s (%h)' "$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo HEAD~1)"..HEAD 2>/dev/null || git log --pretty=format:'- %s (%h)' -10
+          } > CHANGELOG_BODY.md
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: ${{ github.event.inputs.draft == 'true' || github.event_name == 'workflow_dispatch' }}
+          generate_release_notes: true
+          body_path: CHANGELOG_BODY.md
+          files: release-assets/*
