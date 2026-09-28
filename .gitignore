@@ -60,5 +60,7 @@ test_report.*
 report.*
 precheck_report.*
 wipe_certificate.*
+mac_report.*
+mac_precheck.*
 pc_out.txt
 CHANGELOG.md

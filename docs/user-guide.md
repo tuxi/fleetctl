@@ -198,6 +198,29 @@ fleetctl parse-backup /path/to/backup --json
 fleetctl monitor
 ```
 
+### 4.10 mac - 本机 Mac 管理（macOS）
+
+在 Mac 本机运行，使用公开 macOS 命令行工具，**只读**（无写入、无 sudo、无 MDM 绕过）。
+
+```bash
+# 采集本机 Mac 信息
+fleetctl mac detect
+fleetctl mac detect --json
+
+# 只读就绪检查（SIP / FileVault / Secure Boot / MDM 注册）
+fleetctl mac precheck
+fleetctl mac precheck --report mac_precheck.html --report-format html --company "ACME"
+
+# 生成 Mac 盘点报告（json/csv/html/pdf）
+fleetctl mac report --format html --output mac_report.html
+```
+
+**采集字段**：型号、序列号、芯片、macOS 版本/构建号、SIP、Gatekeeper、FileVault、MDM 注册状态、已装描述文件、磁盘、电池。
+
+**预检项**：SIP（enabled 通过）、FileVault（On 通过）、Secure Boot（尽力而为）、MDM 注册（信息项）。
+
+> 说明：Mac 不支持像 iPhone 那样通过 USB 管理（普通运行的 Mac 不暴露 lockdown 服务）。`fleetctl mac` 在 Mac 本机运行，仅调用公开 CLI。写操作（装描述文件、开 FileVault、擦除）不在本阶段范围。
+
 ---
 
 ## 5. 高级用法

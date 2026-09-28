@@ -28,6 +28,12 @@ from fleetctl.precheck import (
     ERASE_GUIDANCE,
     WAIT_ACK_PROMPT,
 )
+from fleetctl.macos import (
+    MacInfoCollector,
+    run_mac_precheck,
+    format_mac_precheck_text,
+    generate_mac_precheck_report,
+)
 
 
 async def cmd_detect(args):
@@ -615,6 +621,89 @@ async def cmd_bulk(args):
                     print(f"  ✗ {udid[:8]}...: {result.get('error', 'Failed')}")
 
 
+async def cmd_mac(args):
+    """Dispatch the `mac` subcommands (local Mac management)."""
+    if args.mac_command == "detect":
+        await cmd_mac_detect(args)
+    elif args.mac_command == "precheck":
+        await cmd_mac_precheck(args)
+    elif args.mac_command == "report":
+        await cmd_mac_report(args)
+    else:
+        print("Unknown mac subcommand", file=sys.stderr)
+        sys.exit(1)
+
+
+def _require_macos():
+    if not MacInfoCollector().available:
+        print("Error: this command manages the local Mac and requires macOS.", file=sys.stderr)
+        sys.exit(1)
+
+
+async def cmd_mac_detect(args):
+    """Collect local Mac inventory."""
+    _require_macos()
+    info = MacInfoCollector().collect()
+    if args.json:
+        print(json.dumps(info, indent=2, ensure_ascii=False))
+        return
+    ident = info.get("identity", {})
+    meta = info.get("metadata", {})
+    status = info.get("status", {})
+    print(f"Model:      {ident.get('product_type')}")
+    print(f"Name:       {ident.get('device_name')}")
+    print(f"Serial:     {ident.get('serial_number')}")
+    print(f"Chip:       {meta.get('chip')}")
+    print(f"macOS:      {ident.get('product_version')} ({ident.get('build_version')})")
+    print(f"SIP:        {status.get('sip')}")
+    print(f"Gatekeeper: {status.get('gatekeeper')}")
+    print(f"FileVault:  {status.get('filevault')}")
+    print(f"MDM:        {'enrolled' if status.get('mdm_enrolled') else 'not enrolled'}")
+    print(f"Profiles:   {status.get('profiles_count')}")
+
+
+async def cmd_mac_precheck(args):
+    """Run read-only macOS readiness checks."""
+    _require_macos()
+    result = run_mac_precheck()
+    print(format_mac_precheck_text(result))
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    report_path = getattr(args, "report", None)
+    if report_path:
+        fmt = getattr(args, "report_format", "json") or "json"
+        content = generate_mac_precheck_report(
+            [result], format=fmt,
+            title=getattr(args, "title", "fleetctl macOS Pre-check Audit Report"),
+            company_name=getattr(args, "company", None),
+        )
+        Path(report_path).write_bytes(content)
+        print(f"\nAudit report written: {report_path} ({fmt})")
+
+
+async def cmd_mac_report(args):
+    """Generate a Mac inventory report (json/csv/html/pdf)."""
+    _require_macos()
+    info = MacInfoCollector().collect()
+    config = ReportConfig(title=args.title, company_name=args.company)
+    try:
+        output = ReportGeneratorFactory.generate_report(
+            devices=[info],
+            format=args.format,
+            config=config,
+            output_path=Path(args.output) if args.output else None,
+        )
+    except Exception as e:
+        print(f"Error generating report: {e}", file=sys.stderr)
+        sys.exit(1)
+    if args.output:
+        print(f"Report generated: {args.output}")
+    elif args.format in ("json", "csv", "html"):
+        print(output.decode("utf-8"))
+    else:
+        print(f"Report generated ({len(output)} bytes). Use --output to save to file.")
+
+
 async def cmd_monitor(args):
     """Monitor device connections."""
     manager = await create_device_manager()
@@ -726,6 +815,26 @@ def main():
     bulk_parser.add_argument("--certificate-format", choices=["json", "pdf"], default="json", help="Certificate format (default: json)")
     bulk_parser.add_argument("--company", help="Organization name shown on PDF certificates")
     
+    # mac command group (local Mac management)
+    mac_parser = subparsers.add_parser("mac", help="Manage the local Mac (macOS)")
+    mac_sub = mac_parser.add_subparsers(dest="mac_command", required=True)
+    
+    mac_detect = mac_sub.add_parser("detect", help="Collect local Mac inventory")
+    mac_detect.add_argument("--json", action="store_true", help="Output as JSON")
+    
+    mac_precheck = mac_sub.add_parser("precheck", help="Read-only macOS readiness checks")
+    mac_precheck.add_argument("--json", action="store_true", help="Output as JSON")
+    mac_precheck.add_argument("--report", metavar="PATH", help="Write an audit report to PATH")
+    mac_precheck.add_argument("--report-format", choices=["json", "html"], default="json", help="Audit report format (default: json)")
+    mac_precheck.add_argument("--title", default="fleetctl macOS Pre-check Audit Report", help="Audit report title")
+    mac_precheck.add_argument("--company", help="Company name for the audit report")
+    
+    mac_report = mac_sub.add_parser("report", help="Generate a Mac inventory report")
+    mac_report.add_argument("--format", choices=["json", "csv", "html", "pdf"], default="html")
+    mac_report.add_argument("--output", help="Output file path")
+    mac_report.add_argument("--title", default="Mac Inventory Report")
+    mac_report.add_argument("--company", help="Company name for report")
+    
     args = parser.parse_args()
     
     # Run async command
@@ -745,6 +854,8 @@ def main():
         _run(cmd_filter(args))
     elif args.command == "bulk":
         _run(cmd_bulk(args))
+    elif args.command == "mac":
+        _run(cmd_mac(args))
     elif args.command == "monitor":
         _run(cmd_monitor(args))
     else:

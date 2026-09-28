@@ -25,6 +25,7 @@
 | M3 | v0.3.0 | 报告专业化 + 批量操作增强 | ✅ 完成 |
 | M4 | v0.4.0 | 文档完善 + 打包分发 + CI/CD | 🔄 进行中 |
 | M5 | v1.0.0 | 正式发布：商业化就绪 | ⏳ 规划中 |
+| M6 | v0.5.0 | **macOS 支持（本机 Agent，只读 MVP）** | 🔄 进行中 |
 
 ---
 
@@ -51,6 +52,21 @@
 ## 📋 后续里程碑任务清单
 
 ### M5: v1.0.0 - 商业化就绪
+
+### M6: v0.5.0 - macOS 支持（本机 Agent，只读 MVP）
+
+Mac 不支持像 iPhone 那样通过 USB 管理（普通运行的 Mac 不暴露 lockdown 服务）。方案：在 Mac 本机运行 `fleetctl`，仅调用公开 macOS CLI。
+
+| 任务 | 状态 | 验收标准 |
+|------|------|----------|
+| 命令执行层 + 平台守卫 | ✅ | 可注入 runner；非 macOS 明确报错 |
+| Mac 盘点采集 | ✅ | 型号/序列号/芯片/macOS/SIP/Gatekeeper/FileVault/MDM/描述文件/磁盘/电池 |
+| Mac 只读预检 | ✅ | SIP / FileVault / Secure Boot / MDM 注册；文本 + JSON/HTML 审计报告 |
+| CLI `mac detect\|precheck\|report` | ✅ | 复用 `report_generator`（json/csv/html/pdf） |
+| 测试 | ✅ | 全部 mock runner，无真实子进程 |
+| **写操作（后续）** | ⏳ | 装/卸描述文件、开 FileVault、擦除 —— 需显式确认，另立阶段 |
+
+**合规**：仅公开 CLI；只读；无 sudo；无 MDM/激活锁绕过。
 
 ---
 

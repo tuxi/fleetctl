@@ -16,6 +16,7 @@
 - [配置写入 (config_writer)](#配置写入-config_writer)
 - [报告生成 (report_generator)](#报告生成-report_generator)
 - [备份解析 (backup_parser)](#备份解析-backup_parser)
+- [macOS 本机管理 (macos)](#macos-本机管理-macos)
 - [CLI 入口 (main)](#cli-入口-main)
 
 ---
@@ -410,6 +411,37 @@ with ManifestDBParser(db_path) as parser:
 ```
 
 ### `open_manifest_db(backup_path) -> Optional[ManifestDBParser]`
+
+---
+
+## macOS 本机管理 (macos)
+
+在 Mac 本机运行，仅调用公开 macOS CLI（system_profiler / sw_vers / csrutil / spctl / fdesetup / profiles / diskutil / pmset）。**只读**：无写入、无 sudo、无 MDM 绕过。
+
+```python
+from fleetctl.macos import MacInfoCollector, run_mac_precheck, generate_mac_precheck_report
+
+collector = MacInfoCollector()          # 可注入 runner / platform_name 以便测试
+info = collector.collect()              # 报告兼容的 device dict
+result = run_mac_precheck(collector)    # 只读就绪检查
+report = generate_mac_precheck_report([result], format="html")
+```
+
+| 成员 | 说明 |
+|------|------|
+| `MacInfoCollector(runner=None, platform_name=None)` | 采集器；`runner` 可注入（测试用） |
+| `MacInfoCollector.available: bool` | 是否在 macOS 上 |
+| `MacInfoCollector.collect() -> dict` | 采集，返回 `identity`/`status`/`resources`/`metadata` 结构（可直接喂给 `report_generator`） |
+| `CommandRunner(timeout=30.0)` | 命令执行器；`run(args) -> str`（失败返回空串） |
+| `is_macos(platform_name=None) -> bool` | 平台判断 |
+| `run_mac_precheck(collector=None) -> dict` | 只读检查：`sip` / `filevault` / `secure_boot` / `mdm_enrollment` |
+| `format_mac_precheck_text(result) -> str` | 人类可读文本 |
+| `generate_mac_precheck_report(results, format="json", title=..., company_name=None) -> bytes` | 审计报告（json/html） |
+| `MAC_CHECK_LABELS` / `MACOS_SCHEMA_VERSION` | 常量 |
+
+**`collect()` 返回的 `status` 额外字段**：`sip`、`gatekeeper`、`filevault`、`mdm_enrolled`、`dep_enrolled`、`activation_lock`；`metadata` 含 `platform="macos"`、`chip`、`os_version`、`memory`。
+
+CLI：`fleetctl mac detect|precheck|report`。
 
 ---
 

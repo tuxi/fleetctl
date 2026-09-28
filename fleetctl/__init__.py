@@ -89,6 +89,16 @@ from .usb_manager import (
     create_device_manager,
 )
 
+from .macos import (
+    MacInfoCollector,
+    CommandRunner,
+    run_mac_precheck,
+    format_mac_precheck_text,
+    generate_mac_precheck_report,
+    is_macos,
+    MACOS_SCHEMA_VERSION,
+)
+
 __all__ = [
     # Device detection
     "DeviceDetector",
@@ -166,4 +176,13 @@ __all__ = [
     "DeviceConnection",
     "DeviceConnectionState",
     "create_device_manager",
+    
+    # macOS (local agent)
+    "MacInfoCollector",
+    "CommandRunner",
+    "run_mac_precheck",
+    "format_mac_precheck_text",
+    "generate_mac_precheck_report",
+    "is_macos",
+    "MACOS_SCHEMA_VERSION",
 ]
