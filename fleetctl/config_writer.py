@@ -91,7 +91,7 @@ class ConfigWriter:
             
             lockdown = await create_using_usbmux(serial=udid)
             
-            async with MobileConfigService(ld) as mc:
+            async with MobileConfigService(lockdown) as mc:
                 # Build configuration dict
                 config_dict = {
                     "AllowPairing": config.allow_pairing,
@@ -150,7 +150,7 @@ class ConfigWriter:
             
             lockdown = await create_using_usbmux(serial=udid)
             
-            async with MobileConfigService(ld) as mc:
+            async with MobileConfigService(lockdown) as mc:
                 config = await mc.get_cloud_configuration()
                 return config or {}
                 
@@ -166,7 +166,7 @@ class ConfigWriter:
             
             lockdown = await create_using_usbmux(serial=udid)
             
-            async with MobileConfigService(ld) as mc:
+            async with MobileConfigService(lockdown) as mc:
                 profile_list = await mc.get_profile_list()
                 return profile_list or {}
                 
@@ -185,7 +185,7 @@ class ConfigWriter:
             
             lockdown = await create_using_usbmux(serial=udid)
             
-            async with MobileConfigService(ld) as mc:
+            async with MobileConfigService(lockdown) as mc:
                 await mc.install_profile(profile_data)
                 return {"success": True, "message": "Profile installed successfully"}
                 
@@ -201,7 +201,7 @@ class ConfigWriter:
             
             lockdown = await create_using_usbmux(serial=udid)
             
-            async with MobileConfigService(ld) as mc:
+            async with MobileConfigService(lockdown) as mc:
                 await mc.remove_profile(identifier)
                 return {"success": True, "message": f"Profile {identifier} removed"}
                 

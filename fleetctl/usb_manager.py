@@ -25,6 +25,35 @@ class DeviceConnectionState(str, Enum):
     ERROR = "error"
 
 
+class _AdaptiveLimiter:
+    """Async concurrency limiter whose limit can be adjusted at runtime.
+
+    ``asyncio.Semaphore`` cannot be resized; this limiter notifies waiters when
+    the limit increases so adaptive concurrency actually takes effect.
+    """
+
+    def __init__(self, limit: int):
+        self._limit = max(1, int(limit))
+        self._active = 0
+        self._condition = asyncio.Condition()
+
+    async def acquire(self) -> None:
+        async with self._condition:
+            while self._active >= self._limit:
+                await self._condition.wait()
+            self._active += 1
+
+    async def release(self) -> None:
+        async with self._condition:
+            self._active = max(0, self._active - 1)
+            self._condition.notify_all()
+
+    async def set_limit(self, limit: int) -> None:
+        async with self._condition:
+            self._limit = max(1, int(limit))
+            self._condition.notify_all()
+
+
 @dataclass
 class DeviceConnection:
     """Represents a connected device."""
@@ -680,52 +709,51 @@ class BulkOperationManager:
             except ImportError:
                 pass
         
-        semaphore = asyncio.Semaphore(current_concurrent)
+        # Adaptive concurrency limiter (supports dynamic resize)
+        limiter = _AdaptiveLimiter(initial_concurrent)
         
         async def run_one(udid: str):
             nonlocal completed, current_concurrent, completed_since_adjustment
             if self._cancelled:
                 return
             
+            await limiter.acquire()
             start_time = asyncio.get_event_loop().time()
-            
-            async with semaphore:
+            try:
                 if self._cancelled:
                     return
+                result = await operation(udid)
+                results[udid] = {"success": True, "result": result}
+            except Exception as e:
+                results[udid] = {"success": False, "error": str(e)}
+            finally:
+                elapsed = asyncio.get_event_loop().time() - start_time
+                response_times.append(elapsed)
                 
-                try:
-                    result = await operation(udid)
-                    results[udid] = {"success": True, "result": result}
-                except Exception as e:
-                    results[udid] = {"success": False, "error": str(e)}
-                finally:
-                    elapsed = asyncio.get_event_loop().time() - start_time
-                    response_times.append(elapsed)
-                    
-                    completed += 1
-                    completed_udids.add(udid)
-                    completed_since_adjustment += 1
-                    
-                    # Save checkpoint after each completion
-                    if self._checkpoint_file:
-                        self._save_checkpoint(list(completed_udids), results)
-                    
-                    if progress_callback:
-                        progress_callback(udid, completed, len(udids) + len(completed_udids) - len(completed_udids))
-                    if pbar:
-                        pbar.update(1)
-                    
-                    # Adjust concurrency periodically
-                    completed_since_adjustment += 1
-                    if completed_since_adjustment >= adjustment_interval and len(response_times) >= 3:
-                        optimal = self.calculate_optimal_concurrency(
-                            response_times, min_concurrent, max_concurrent, target_latency
-                        )
-                        if optimal != current_concurrent:
-                            current_concurrent = optimal
-                            # Recreate semaphore with new concurrency
-                            semaphore = asyncio.Semaphore(current_concurrent)
-                        completed_since_adjustment = 0
+                completed += 1
+                completed_udids.add(udid)
+                completed_since_adjustment += 1
+                
+                # Save checkpoint after each completion
+                if self._checkpoint_file:
+                    self._save_checkpoint(list(completed_udids), results)
+                
+                await limiter.release()
+                
+                if progress_callback:
+                    progress_callback(udid, completed, len(udids) + len(completed_udids) - len(completed_udids))
+                if pbar:
+                    pbar.update(1)
+                
+                # Adjust concurrency periodically based on observed latency
+                if completed_since_adjustment >= adjustment_interval and len(response_times) >= 3:
+                    optimal = self.calculate_optimal_concurrency(
+                        response_times, min_concurrent, max_concurrent, target_latency
+                    )
+                    if optimal != current_concurrent:
+                        current_concurrent = optimal
+                        await limiter.set_limit(current_concurrent)
+                    completed_since_adjustment = 0
         
         await asyncio.gather(*[run_one(udid) for udid in udids])
         

@@ -2,6 +2,8 @@
 Tests for usb_manager module.
 """
 
+import asyncio
+
 import pytest
 from fleetctl.usb_manager import (
     USBDeviceManager,
@@ -322,6 +324,76 @@ class TestCreateDeviceManager:
         manager = await create_device_manager()
         assert isinstance(manager, USBDeviceManager)
         await manager.stop_monitoring()
+
+
+class TestAdaptiveConcurrency:
+    """Tests for adaptive concurrency control."""
+
+    @pytest.fixture
+    def bulk_manager(self):
+        return BulkOperationManager(USBDeviceManager())
+
+    async def test_run_on_all_adaptive_success(self, bulk_manager):
+        async def operation(udid):
+            await asyncio.sleep(0.01)
+            return f"r-{udid}"
+
+        for i in range(3):
+            bulk_manager.device_manager._add_device(f"udid-{i}")
+
+        results = await bulk_manager.run_on_all_adaptive(
+            operation, initial_concurrent=2, adjustment_interval=1
+        )
+        assert len(results) == 3
+        assert all(r["success"] for r in results.values())
+
+    async def test_adaptive_respects_limit(self, bulk_manager):
+        active = 0
+        peak = 0
+
+        async def operation(udid):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.02)
+            active -= 1
+            return "ok"
+
+        for i in range(6):
+            bulk_manager.device_manager._add_device(f"udid-{i}")
+
+        await bulk_manager.run_on_all_adaptive(
+            operation,
+            initial_concurrent=2,
+            min_concurrent=1,
+            max_concurrent=2,
+            adjustment_interval=100,  # disable adjustment for determinism
+        )
+        assert peak <= 2
+
+    async def test_adaptive_adjustment_path_runs(self, bulk_manager):
+        async def operation(udid):
+            await asyncio.sleep(0.005)
+            return "ok"
+
+        for i in range(4):
+            bulk_manager.device_manager._add_device(f"udid-{i}")
+
+        results = await bulk_manager.run_on_all_adaptive(
+            operation,
+            initial_concurrent=2,
+            min_concurrent=1,
+            max_concurrent=4,
+            target_latency=0.001,  # force a downward adjustment
+            adjustment_interval=1,
+        )
+        assert len(results) == 4
+
+    def test_calculate_optimal_concurrency(self):
+        assert BulkOperationManager.calculate_optimal_concurrency([], 1, 8) == 8
+        assert BulkOperationManager.calculate_optimal_concurrency([0.1, 0.2, 0.1], 1, 8, 5.0) >= 1
+        # High latency should not exceed the cap
+        assert BulkOperationManager.calculate_optimal_concurrency([30.0] * 5, 1, 8, 1.0) <= 8
 
 
 if __name__ == "__main__":
