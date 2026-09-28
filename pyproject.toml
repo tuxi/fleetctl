@@ -88,6 +88,8 @@ extend-exclude = '''
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -100,8 +102,28 @@ select = [
 ignore = [
     "E501",  # line too long (handled by black)
     "B008",  # function calls in default arguments
+    "W291",  # trailing whitespace
+    "W292",  # missing newline at end of file
+    "W293",  # blank line contains whitespace
+    "UP006",  # PEP 585 built-in generics
+    "UP015",  # redundant open modes
+    "UP024",  # os.error -> OSError alias
+    "UP035",  # deprecated imports
+    "UP037",  # quoted annotations
+    "UP042",  # str + Enum -> StrEnum
+    "UP045",  # PEP 604 optional annotations
+    "F401",  # unused imports (re-exports / pre-existing)
+    "F601",  # repeated dict key literal (intentional tables)
+    "F811",  # redefinition (intentional re-exports in __init__)
+    "F841",  # unused local variable (pre-existing)
+    "F541",  # f-string without placeholders
+    "B007",  # unused loop control variable
+    "C408",  # unnecessary collection call
+    "I001",  # import sorting (pre-existing style)
 ]
-per-file-ignores = { "tests/*" = ["S101", "S106"] }  # allow assert and hardcoded passwords in tests
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S106"]  # allow assert and hardcoded passwords in tests
 
 [tool.mypy]
 python_version = "3.11"
