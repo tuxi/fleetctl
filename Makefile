@@ -61,6 +61,13 @@ build: clean-build ## Build Python sdist + wheel
 	python -m build
 
 binary: ## Build standalone binary with PyInstaller
+	@if [ "$$(python -c 'import sysconfig;print(sysconfig.get_config_var("Py_ENABLE_SHARED") or 0)')" != "1" ]; then \
+		echo "[!] This Python was built without a shared library (Py_ENABLE_SHARED=0)."; \
+		echo "    PyInstaller requires a shared-library Python."; \
+		echo "    Fix: use a python.org build, pyenv, or a system Python with shared libs."; \
+		echo "    CI uses actions/setup-python and builds fine."; \
+		exit 1; \
+	fi
 	pip install pyinstaller
 	pyinstaller --clean --noconfirm \
 		--name $(APP_NAME) \
