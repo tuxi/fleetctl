@@ -3,8 +3,11 @@ Tests for usb_manager module.
 """
 
 import asyncio
+from unittest.mock import MagicMock
 
 import pytest
+import pymobiledevice3.lockdown
+import pymobiledevice3.usbmux
 from fleetctl.usb_manager import (
     USBDeviceManager,
     BulkOperationManager,
@@ -324,6 +327,37 @@ class TestCreateDeviceManager:
         manager = await create_device_manager()
         assert isinstance(manager, USBDeviceManager)
         await manager.stop_monitoring()
+
+
+class TestEnumerateFiltering:
+    """enumerate() must skip non-iOS Apple USB entries (e.g. T2 controller)."""
+
+    async def test_skips_placeholder_serial(self, monkeypatch):
+        class Mux:
+            def __init__(self, serial, ct="USB"):
+                self.serial = serial
+                self.connection_type = ct
+
+        async def fake_list():
+            return [Mux("00008101-000C6598363A001E"), Mux("000000000000")]
+
+        ld = MagicMock()
+        ld.all_values = {
+            "ProductType": "iPhone13,3",
+            "ProductVersion": "17.0",
+            "DeviceName": "iPhone",
+        }
+
+        async def fake_create(serial=None):
+            return ld
+
+        monkeypatch.setattr(pymobiledevice3.usbmux, "list_devices", fake_list)
+        monkeypatch.setattr(pymobiledevice3.lockdown, "create_using_usbmux", fake_create)
+
+        devices = await USBDeviceManager().enumerate()
+        assert len(devices) == 1
+        assert devices[0]["udid"] == "00008101-000C6598363A001E"
+        assert devices[0]["product_type"] == "iPhone13,3"
 
 
 class TestAdaptiveConcurrency:

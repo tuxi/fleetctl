@@ -168,7 +168,12 @@ class USBDeviceManager:
             del self._devices[udid]
     
     async def enumerate(self) -> List[Dict[str, Any]]:
-        """Enumerate all connected devices."""
+        """Enumerate all connected iOS devices.
+
+        Filters out non-iOS Apple USB devices that usbmuxd also reports (e.g.
+        the Mac's "Apple T2 Controller", which appears with the placeholder
+        serial ``000000000000`` and does not speak the lockdown protocol).
+        """
         if not self._pymobiledevice3_available:
             return []
         
@@ -180,6 +185,12 @@ class USBDeviceManager:
             result = []
             for mux_device in mux_devices:
                 udid = mux_device.serial
+                
+                # Skip placeholder / non-iOS entries (e.g. T2 controller)
+                if not udid or set(udid) == {"0"}:
+                    logger.debug(f"Skipping non-iOS usbmux entry: {udid!r}")
+                    continue
+                
                 device_info = {
                     "udid": udid,
                     "connection_type": mux_device.connection_type,
