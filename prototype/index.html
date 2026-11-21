@@ -420,6 +420,11 @@
     padding: 10px 28px;
     border-bottom: 1px solid var(--line);
   }
+  .report-notice {
+    font-size: 11px; color: var(--ink-2);
+    border: 1px solid var(--line-strong); border-radius: 100px;
+    padding: 1px 8px;
+  }
   .report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; }
   .report-grid div { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
   .report-grid .k { color: var(--ink-3); width: 76px; flex: 0 0 auto; }
@@ -762,10 +767,10 @@
       <!-- devices -->
       <section class="view" id="view-devices">
         <div class="stats">
-          <div class="stat"><div class="v">8</div><div class="l">在库</div></div>
-          <div class="stat"><div class="v" style="color:var(--clean)">3</div><div class="l">干净</div></div>
-          <div class="stat"><div class="v" style="color:var(--lock)">3</div><div class="l">异常</div></div>
-          <div class="stat"><div class="v" style="color:var(--unknown)">2</div><div class="l">未验证</div></div>
+          <div class="stat"><div class="v" id="dev-total">0</div><div class="l">在库</div></div>
+          <div class="stat"><div class="v" id="dev-clean" style="color:var(--clean)">0</div><div class="l">干净</div></div>
+          <div class="stat"><div class="v" id="dev-bad" style="color:var(--lock)">0</div><div class="l">异常</div></div>
+          <div class="stat"><div class="v" id="dev-unknown" style="color:var(--unknown)">0</div><div class="l">未验证</div></div>
         </div>
         <div class="batch-bar">
           <span class="muted" id="devices-summary">—</span>
@@ -867,6 +872,8 @@
       <section class="view" id="view-report">
         <div class="report-bar">
           <span class="muted" id="report-sub">—</span>
+          <span class="report-notice" id="report-notice" style="display:none">历史快照</span>
+          <button class="btn" id="report-back" style="display:none">返回当前设备</button>
           <span style="flex:1"></span>
           <button class="btn" id="report-history">历史</button>
           <button class="btn" id="report-json">导出 JSON</button>
@@ -1796,9 +1803,21 @@ document.getElementById("wiz-action").addEventListener("click", () => {
 document.getElementById("wiz-back").addEventListener("click", () => switchView("recycle"));
 
 function openIntake() {
+  const device = current && current.real ? current : null;
+  if (device) {
+    const select = document.getElementById("f-model");
+    if ([...select.options].some(option => option.value === device.name)) {
+      select.value = device.name;
+    }
+    document.getElementById("f-serial").value =
+      device.serial && device.serial !== "—" ? device.serial : "";
+    applyPriceSuggestion();
+  }
+
   document.getElementById("scrim").classList.add("show");
   document.getElementById("intake-modal").classList.add("show");
   document.getElementById("f-model").focus();
+  if (device) toast(`已带入当前设备 ${device.name}`);
 }
 
 function closeIntake() {
@@ -1863,6 +1882,18 @@ function updateStats() {
 
   document.getElementById("nav-recycle-count").textContent = pending;
   document.getElementById("nav-devices-count").textContent = devices.length;
+
+  const clean = devices.filter(d => d.status === "clean").length;
+  const bad = devices.filter(d => d.status === "lock" || d.status === "mdm").length;
+  const unknown = devices.filter(d => d.status === "unknown").length;
+  const setText = (id, value) => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = value;
+  };
+  setText("dev-total", devices.length);
+  setText("dev-clean", clean);
+  setText("dev-bad", bad);
+  setText("dev-unknown", unknown);
 
   if (document.getElementById("view-recycle").classList.contains("active")) {
     document.getElementById("view-sub").textContent =
@@ -2698,7 +2729,8 @@ const HW_CHECKS = [
   ["front_cam", "前置摄像头"],
   ["rear_cam", "后置摄像头"],
   ["biometrics", "Face ID / 触控 ID"],
-  ["speaker", "扬声器"],
+  ["speaker", "扬声器（外放）"],
+  ["earpiece", "听筒"],
   ["mic", "麦克风"],
   ["buttons", "按键与静音键"],
   ["port", "充电口"],
@@ -2901,9 +2933,14 @@ function reportData(d) {
   };
 }
 
-function renderReport(d) {
+function renderReport(d, options = {}) {
+  const archived = options.archived === true;
   const sheet = document.getElementById("report-sheet");
   const sub = document.getElementById("report-sub");
+  const notice = document.getElementById("report-notice");
+  const back = document.getElementById("report-back");
+  if (notice) notice.style.display = archived ? "" : "none";
+  if (back) back.style.display = archived ? "" : "none";
 
   if (!d) {
     sub.textContent = "—";
@@ -2993,6 +3030,15 @@ function renderReport(d) {
   if (d.buyer) trade.push(`<tr><th>买家</th><td>${esc(d.buyer)}</td></tr>`);
   if (trade.length) parts.push(`<h4>交易信息</h4><table>${trade.join("")}</table>`);
 
+  parts.push(`<h4>数据来源</h4>
+    <div class="report-grid">
+      <div><span class="k">设备标识</span><span class="v">自动读取</span></div>
+      <div><span class="k">锁判定</span><span class="v">Apple 激活服务器</span></div>
+      <div><span class="k">机器状态</span><span class="v">自动读取</span></div>
+      <div><span class="k">硬件检查</span><span class="v">人工录入</span></div>
+      <div><span class="k">来源 / 卖家 / 价格</span><span class="v">人工录入</span></div>
+    </div>`);
+
   parts.push(`<div class="sheet-foot">
     <span>生成于 ${esc(when)}</span>
     <span>只读检测 · 数据来自设备与 Apple 激活服务器</span>
@@ -3056,7 +3102,7 @@ async function loadArchived(id) {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "读取失败");
     closeHistory();
-    renderReport(data.archived.device);
+    renderReport(data.archived.device, { archived: true });
     document.getElementById("report-sub").textContent = `${data.archived.device.name || ""} · 历史记录`;
     toast("已载入历史报告");
   } catch (err) {
@@ -3075,23 +3121,38 @@ async function openHistory() {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "读取失败");
 
-    if (!data.reports.length) {
-      list.innerHTML = `<div class="hw-empty">还没有归档的报告。导出一份报告就会存一条。</div>`;
-      return;
+    const rows = [];
+
+    if (current) {
+      rows.push(`<button class="history-row" data-current="1">
+        <span class="badge ${current.status}">${labels[current.status] || "—"}</span>
+        <span><div class="name">${esc(current.name)} <span class="muted">（当前设备）</span></div>
+          <div class="sub">${esc(current.serial)}</div></span>
+        <span class="when">实时</span>
+      </button>`);
     }
 
-    list.innerHTML = data.reports
-      .map(report => {
-        const when = formatStamp(report.generated_at);
-        return `<button class="history-row" data-id="${report.id}">
-          <span class="badge ${report.status}">${labels[report.status] || "—"}</span>
-          <span><div class="name">${esc(report.name)}</div><div class="sub">${esc(report.serial)}</div></span>
-          <span class="when">${esc(when)}</span>
-        </button>`;
-      })
-      .join("");
+    data.reports.forEach(report => {
+      const when = formatStamp(report.generated_at);
+      rows.push(`<button class="history-row" data-id="${report.id}">
+        <span class="badge ${report.status}">${labels[report.status] || "—"}</span>
+        <span><div class="name">${esc(report.name)}</div><div class="sub">${esc(report.serial)}</div></span>
+        <span class="when">${esc(when)}</span>
+      </button>`);
+    });
 
-    list.querySelectorAll(".history-row").forEach(row => {
+    list.innerHTML = rows.length
+      ? rows.join("")
+      : `<div class="hw-empty">还没有归档的报告。导出一份报告就会存一条。</div>`;
+
+    list.querySelectorAll('[data-current="1"]').forEach(row => {
+      row.addEventListener("click", () => {
+        closeHistory();
+        renderReport(current);
+        toast("已切回当前设备");
+      });
+    });
+    list.querySelectorAll(".history-row[data-id]").forEach(row => {
       row.addEventListener("click", () => loadArchived(Number(row.dataset.id)));
     });
   } catch (err) {
@@ -3107,6 +3168,12 @@ function closeHistory() {
 document.getElementById("report-history").addEventListener("click", openHistory);
 document.getElementById("history-close").addEventListener("click", closeHistory);
 document.getElementById("history-cancel").addEventListener("click", closeHistory);
+
+document.getElementById("report-back").addEventListener("click", () => {
+  if (!current) { toast("没有当前设备"); return; }
+  renderReport(current);
+  toast("已切回当前设备");
+});
 
 const gradeButtons = document.querySelectorAll("#f-grade button");
 gradeButtons.forEach(btn => {
@@ -3132,6 +3199,28 @@ document.getElementById("intake-form").addEventListener("submit", e => {
   const grade = document.querySelector('#f-grade button[aria-pressed="true"]').dataset.grade;
   const seller = document.getElementById("f-seller").value.trim();
   const priceNum = Number(document.getElementById("f-price").value || 0);
+
+  const duplicate = serial
+    ? devices.find(item => item.serial && item.serial === serial)
+    : null;
+  if (duplicate) {
+    duplicate.price = "¥" + priceNum.toLocaleString("en-US");
+    duplicate.seller = seller || duplicate.seller || "—";
+    duplicate.source = source;
+    duplicate.productType = type;
+    duplicate.capacity = storage;
+    duplicate.grade = grade;
+    duplicate.time = "刚刚";
+    closeIntake();
+    document.getElementById("intake-form").reset();
+    gradeButtons.forEach((b, i) => b.setAttribute("aria-pressed", String(i === 0)));
+    renderBoard();
+    renderTable();
+    updateStats();
+    saveManualDevices();
+    toast(`已更新 ${duplicate.name} 的收机信息`);
+    return;
+  }
 
   devices.unshift({
     id: "m" + Date.now().toString(36),
@@ -3196,10 +3285,13 @@ function switchView(name) {
   });
   const [t, s] = titles[name];
   document.getElementById("view-title").textContent = t;
+  const badCount = devices.filter(d => d.status === "lock" || d.status === "mdm").length;
   document.getElementById("view-sub").textContent =
     name === "recycle"
       ? `${devices.length} 台本周收机 · ${pendingCount()} 台待处理`
-      : s;
+      : name === "devices"
+        ? `${devices.length} 台在库 · ${badCount} 台异常`
+        : s;
   appEl.classList.remove("inspecting");
   appEl.classList.toggle("no-inspector", name !== "devices" || devices.length === 0);
   appEl.classList.remove("overlay-inspector");
