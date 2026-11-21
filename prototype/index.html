@@ -767,6 +767,11 @@
           <div class="stat"><div class="v" style="color:var(--lock)">3</div><div class="l">异常</div></div>
           <div class="stat"><div class="v" style="color:var(--unknown)">2</div><div class="l">未验证</div></div>
         </div>
+        <div class="batch-bar">
+          <span class="muted" id="devices-summary">—</span>
+          <span style="flex:1"></span>
+          <button class="btn" id="devices-export">导出 CSV</button>
+        </div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -1293,6 +1298,10 @@ function renderTable(filter = "") {
        </td></tr>`;
   document.getElementById("table-foot").textContent =
     `显示 ${list.length} 台 · 共 ${devices.length} 台在库`;
+  const summary = document.getElementById("devices-summary");
+  if (summary) {
+    summary.textContent = `共 ${devices.length} 台 · 当前显示 ${list.length} 台`;
+  }
   const trs = [...rowsEl.querySelectorAll("tr[data-id]")];
   trs.forEach((tr, i) => {
     const pick = () => selectDevice(tr.dataset.id);
@@ -3206,6 +3215,72 @@ function switchView(name) {
 
 document.querySelectorAll(".nav-item").forEach(btn => {
   btn.addEventListener("click", () => switchView(btn.dataset.view));
+});
+
+const STAGE_LABELS = {
+  await: "待检测",
+  testing: "检测中",
+  pricing: "待定价",
+  stocked: "已入库",
+  sold: "已售出",
+  returned: "退回",
+};
+
+function filteredDevices() {
+  const query = (document.getElementById("search").value || "").trim().toLowerCase();
+  return devices.filter(d =>
+    !query ||
+    [d.name, d.model, d.serial, d.imei, d.udid, d.source, d.seller]
+      .join(" ")
+      .toLowerCase()
+      .includes(query)
+  );
+}
+
+document.getElementById("devices-export").addEventListener("click", async () => {
+  const list = filteredDevices();
+  if (!list.length) { toast("没有可导出的设备"); return; }
+
+  const header = [
+    "机型", "型号代码", "序列号", "UDID", "IMEI", "系统", "来源", "卖家",
+    "阶段", "判定", "回收价", "出货价", "毛利", "售价", "成交日期", "买家",
+  ];
+  const lines = [header.join(",")];
+  list.forEach(d => {
+    lines.push([
+      d.name, d.model, d.serial, d.udid || "", d.imei, d.ios, d.source, d.seller,
+      STAGE_LABELS[d.stage] || d.stage || "", labels[d.status] || d.status || "",
+      d.price || "", d.salePrice || "",
+      typeof d.margin === "number" ? d.margin : "",
+      d.soldPrice || "", d.soldAt || "", d.buyer || "",
+    ].map(csvCell).join(","));
+  });
+
+  const content = "﻿" + lines.join("\r\n");
+  const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+  const filename = `fleetctl-devices-${stamp}.csv`;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename, content }),
+    });
+    const data = await res.json();
+    if (data.ok) { toast(`已导出 ${list.length} 台到 ${data.path}`); return; }
+  } catch (err) {
+    // fall through to a browser download
+  }
+
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  toast(`已导出 ${list.length} 台`);
 });
 
 document.getElementById("search").addEventListener("input", e => {
