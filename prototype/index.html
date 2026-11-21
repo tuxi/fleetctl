@@ -646,7 +646,6 @@
     <div class="nav-label">工作台</div>
     <button class="nav-item" data-view="recycle" aria-current="page">回收<span class="nav-count" id="nav-recycle-count">4</span></button>
     <button class="nav-item" data-view="devices">设备<span class="nav-count" id="nav-devices-count">8</span></button>
-    <button class="nav-item" data-view="inspect">验机<span class="nav-count">3</span></button>
     <button class="nav-item" data-view="report">报告<span class="nav-count">28</span></button>
     <button class="nav-item" data-view="batch">批量</button>
 
@@ -2166,8 +2165,9 @@ const titles = {
 function switchView(name) {
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
   document.getElementById("view-" + name).classList.add("active");
+  const navTarget = name === "inspect" ? "devices" : name;
   document.querySelectorAll(".nav-item").forEach(b => {
-    if (b.dataset.view === name) b.setAttribute("aria-current", "page");
+    if (b.dataset.view === navTarget) b.setAttribute("aria-current", "page");
     else b.removeAttribute("aria-current");
   });
   const [t, s] = titles[name];
@@ -2184,13 +2184,7 @@ function switchView(name) {
 }
 
 document.querySelectorAll(".nav-item").forEach(btn => {
-  btn.addEventListener("click", () => {
-    if (btn.dataset.view === "inspect") {
-      openInspect((current || devices[0]).id);
-      return;
-    }
-    switchView(btn.dataset.view);
-  });
+  btn.addEventListener("click", () => switchView(btn.dataset.view));
 });
 
 document.getElementById("search").addEventListener("input", e => renderTable(e.target.value));
