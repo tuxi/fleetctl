@@ -57,6 +57,20 @@ async def collect_devices() -> list[dict]:
         except Exception:
             pass
 
+        # Local Find My flags. These are an advisory for an activated device,
+        # not an authoritative lock verdict: Apple only answers that at
+        # activation time.
+        nvram = info.get("NonVolatileRAM") or {}
+
+        def nvram_text(key: str) -> str:
+            value = nvram.get(key)
+            if isinstance(value, (bytes, bytearray)):
+                return value.decode("utf-8", "replace")
+            return value if isinstance(value, str) else ""
+
+        findmy_locked = nvram_text("fm-activation-locked").strip().upper() == "YES"
+        findmy_account = nvram_text("fm-account-masked").strip() or None
+
         devices.append(
             {
                 "udid": udid,
@@ -67,6 +81,8 @@ async def collect_devices() -> list[dict]:
                 "imei": info.get("InternationalMobileEquipmentIdentity") or "—",
                 "region": info.get("RegionInfo") or "—",
                 "activation_state": info.get("ActivationState") or "—",
+                "findmy_locked": findmy_locked,
+                "findmy_account": findmy_account,
             }
         )
 

@@ -872,6 +872,7 @@
         <dt id="insp-margin-label" style="display:none">毛利</dt><dd id="insp-margin" style="display:none">—</dd>
         <dt id="insp-sold-label" style="display:none">售价</dt><dd id="insp-sold" style="display:none">—</dd>
         <dt id="insp-buyer-label" style="display:none">买家</dt><dd id="insp-buyer" style="display:none">—</dd>
+        <dt id="insp-findmy-label" style="display:none">Find My</dt><dd class="plain" id="insp-findmy" style="display:none">—</dd>
         <dt>检测时间</dt><dd id="insp-time">11-21 13:42</dd>
       </dl>
 
@@ -1202,6 +1203,15 @@ function selectDevice(id, open = true) {
   document.getElementById("insp-buyer").style.display = showSold ? "" : "none";
   document.getElementById("insp-buyer").textContent = d.buyer || "—";
 
+  const showFindMy = d.real && typeof d.findmyLocked === "boolean";
+  document.getElementById("insp-findmy-label").style.display = showFindMy ? "" : "none";
+  document.getElementById("insp-findmy").style.display = showFindMy ? "" : "none";
+  document.getElementById("insp-findmy").textContent = showFindMy
+    ? (d.findmyLocked
+        ? `已开启${d.findmyAccount ? " · " + d.findmyAccount : ""}`
+        : "未开启")
+    : "—";
+
   const badge = document.getElementById("insp-badge");
   badge.className = "badge " + d.status;
   badge.textContent = labels[d.status];
@@ -1405,6 +1415,7 @@ async function runInspection(d) {
 function applyVerdict(d, result) {
   d.status = result;
   d.time = "刚刚";
+  delete d.note;
   if (result === "clean") {
     d.verdict = "服务器接受激活";
     d.hint = VERDICTS.clean.hint;
@@ -1427,6 +1438,7 @@ function applyRealProbe(d, probe, result) {
   d.status = result;
   d.time = "刚刚";
   d.serverQuote = probe.server_message || null;
+  delete d.note;
 
   if (result === "lock") {
     d.verdict = "绑定他人账户";
@@ -1445,9 +1457,17 @@ function applyRealProbe(d, probe, result) {
     delete d.org;
   } else {
     d.verdict = "未验证";
-    d.hint = probe.verdict === "pending_erase"
-      ? "设备已激活，抹机后才能复验锁状态。"
-      : "没有得到结论，不能当作干净设备。";
+    if (probe.verdict === "pending_erase") {
+      if (d.findmyLocked) {
+        const account = d.findmyAccount ? ` ${d.findmyAccount}` : "原 Apple 账户";
+        d.hint = `设备已激活。本机检测到 Find My 已开启${d.findmyAccount ? "（" + d.findmyAccount + "）" : ""}，抹机会触发激活锁。`;
+        d.note = `<strong>Find My 已开启。</strong>抹掉这台设备会要求输入${account} 的密码，否则无法重新激活。`;
+      } else {
+        d.hint = "设备已激活，抹机后才能复验锁状态。";
+      }
+    } else {
+      d.hint = "没有得到结论，不能当作干净设备。";
+    }
     d.account = null;
     delete d.org;
   }
@@ -1486,8 +1506,9 @@ function showVerdict(d, result) {
         : V.quote || "—");
 
   const note = document.getElementById("wiz-note");
-  if (V.note) {
-    note.innerHTML = V.note;
+  const noteHtml = d.note || V.note;
+  if (noteHtml) {
+    note.innerHTML = noteHtml;
     note.className = "note " + result;
     note.style.display = "block";
   } else {
@@ -1621,6 +1642,8 @@ function deviceCard(entry) {
     verdict: "未验证",
     hint: "已连接，尚未检测。",
     account: null,
+    findmyLocked: entry.findmy_locked === true,
+    findmyAccount: entry.findmy_account || null,
   };
 }
 
@@ -1676,6 +1699,8 @@ async function refreshRealDevices() {
           existing.ios = entry.ios;
           existing.serial = entry.serial;
           existing.imei = entry.imei;
+          existing.findmyLocked = entry.findmy_locked === true;
+          existing.findmyAccount = entry.findmy_account || null;
         } else {
           devices.unshift(deviceCard(entry));
         }
