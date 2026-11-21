@@ -275,11 +275,15 @@ class DeviceFingerprint:
         return cls(**data)
 
     def matches(self, other: "DeviceFingerprint", threshold: float = 0.8) -> bool:
-        """Check if two fingerprints match above threshold."""
-        if self.udid and other.udid and self.udid == other.udid:
-            return True
-        if self.serial_number and other.serial_number and self.serial_number == other.serial_number:
-            return True
+        """Check whether two fingerprints describe the same device.
+
+        A unique identifier present on both sides is decisive: equal means the
+        same device, different means it is not, regardless of hardware.
+        """
+        if self.udid and other.udid:
+            return self.udid == other.udid
+        if self.serial_number and other.serial_number:
+            return self.serial_number == other.serial_number
 
         matches = 0
         total = 0

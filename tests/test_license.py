@@ -98,6 +98,36 @@ class TestDeviceFingerprint:
         )
         assert a.matches(b) is False
 
+    def test_different_udids_with_same_hardware_do_not_match(self):
+        hardware = dict(
+            product_type="iPhone16,1", hardware_model="D83AP", cpu_architecture="arm64e"
+        )
+        assert (
+            DeviceFingerprint(udid="u1", **hardware).matches(
+                DeviceFingerprint(udid="u2", **hardware)
+            )
+            is False
+        )
+
+    def test_different_serials_with_same_hardware_do_not_match(self):
+        hardware = dict(
+            product_type="iPhone16,1", hardware_model="D83AP", cpu_architecture="arm64e"
+        )
+        assert (
+            DeviceFingerprint(serial_number="SN1", **hardware).matches(
+                DeviceFingerprint(serial_number="SN2", **hardware)
+            )
+            is False
+        )
+
+    def test_matching_udid_wins_over_hardware(self):
+        assert (
+            DeviceFingerprint(udid="u1", product_type="A").matches(
+                DeviceFingerprint(udid="u1", product_type="B")
+            )
+            is True
+        )
+
 
 class TestLicense:
     def test_trial_is_valid(self):
