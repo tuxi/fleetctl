@@ -140,7 +140,7 @@ MIT License - 详见 [LICENSE](LICENSE)
 | M1 | v0.1.0 | MVP：CLI、设备检测、备份解析、报告 | ✅ |
 | M2 | v0.2.0 | precheck 三步手工门自动化 | ✅ |
 | M3 | v0.3.0 | 报告专业化 + 批量操作增强 | ✅ |
-| M4 | v0.4.0 | 文档 + 打包 + CI/CD | 🔄 |
-| M5 | v1.0.0 | 商业化就绪 | ⏳ |
+| M4 | v0.4.0 | 文档 + 打包 + CI/CD | ✅ |
+| M5 | v1.0.0 | 商业化就绪（当前冲刺：T5.4 分发/更新通道） | 🔄 |
 
 详见 [docs/ROADMAP.md](docs/ROADMAP.md)。
