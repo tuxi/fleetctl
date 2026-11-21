@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -71,6 +72,31 @@ async def collect_devices() -> list[dict]:
         findmy_locked = nvram_text("fm-activation-locked").strip().upper() == "YES"
         findmy_account = nvram_text("fm-account-masked").strip() or None
 
+        # Erase history: the last "Erase All Content and Settings" (EACS) or
+        # DFU restore, with its timestamp and reason.
+        obliteration = nvram_text("obliteration").strip()
+        erase_at = None
+        erase_method = None
+        erase_reason = None
+        if obliteration:
+            stamp = re.search(r"@(\d{9,})", obliteration)
+            if stamp:
+                erase_at = datetime.fromtimestamp(
+                    int(stamp.group(1)), timezone.utc
+                ).strftime("%Y-%m-%d")
+            upper = obliteration.upper()
+            erase_method = "EACS" if upper.startswith("EACS") else ("DFU" if "DFU" in upper else None)
+            reason = re.search(r"Reason:\s*([^\[\],]+)", obliteration)
+            if reason:
+                erase_reason = reason.group(1).strip()
+
+        # Kernel panic history: reliability signal.
+        panic_raw = nvram_text("panicmedic-timestamps").strip()
+        panic_records = 0
+        if panic_raw:
+            body = panic_raw.split(":", 1)[1] if ":" in panic_raw else panic_raw
+            panic_records = len([part for part in body.split(",") if part.strip()])
+
         devices.append(
             {
                 "udid": udid,
@@ -83,6 +109,23 @@ async def collect_devices() -> list[dict]:
                 "activation_state": info.get("ActivationState") or "—",
                 "findmy_locked": findmy_locked,
                 "findmy_account": findmy_account,
+                "erase_at": erase_at,
+                "erase_method": erase_method,
+                "erase_reason": erase_reason,
+                "panic_records": panic_records,
+                "boot_args": nvram_text("boot-args").strip(),
+                # PasswordProtected tracks whether the device is locked right
+                # now, not whether a passcode was ever set.
+                "screen_locked": info.get("PasswordProtected") is True,
+                "build_version": info.get("BuildVersion") or "—",
+                "baseband_status": info.get("BasebandStatus") or "—",
+                "baseband_version": info.get("BasebandVersion") or "—",
+                "sim_status": info.get("SIMStatus") or "—",
+                "sim_tray": info.get("SIMTrayStatus") or "—",
+                "carrier_mcc": info.get("MobileSubscriberCountryCode"),
+                "carrier_mnc": info.get("MobileSubscriberNetworkCode"),
+                "fusing_status": info.get("FusingStatus"),
+                "device_color": info.get("DeviceColor"),
             }
         )
 

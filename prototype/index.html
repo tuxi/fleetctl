@@ -264,16 +264,18 @@
     background: var(--surface-2);
     border-left: 1px solid var(--line);
     display: flex; flex-direction: column;
-    min-width: 0;
+    min-width: 0; min-height: 0;
+    overflow: hidden;
   }
   .insp-head {
     padding: 18px 20px 14px;
     border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
   }
   .insp-head .row { display: flex; align-items: flex-start; gap: 10px; }
   .insp-head h2 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
   .insp-head .model { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
-  .insp-body { padding: 18px 20px; overflow: auto; flex: 1; }
+  .insp-body { padding: 18px 20px; overflow: auto; flex: 1 1 auto; min-height: 0; }
 
   .verdict { margin-bottom: 20px; }
   .verdict .k { font-size: 11px; color: var(--ink-3); margin-bottom: 4px; }
@@ -296,6 +298,8 @@
   .kv dt { color: var(--ink-3); font-size: 12px; }
   .kv dd { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--ink); word-break: break-all; }
   .kv dd.plain { font-family: var(--sans); }
+  .kv dd.warn { color: var(--lock); }
+  .kv-hint { font-size: 11px; color: var(--ink-3); margin-top: 6px; }
 
   .quote {
     margin-top: 10px;
@@ -316,6 +320,7 @@
     padding: 12px 20px 16px;
     border-top: 1px solid var(--line);
     display: flex; gap: 8px;
+    flex: 0 0 auto;
   }
   .insp-foot .btn { flex: 1; text-align: center; }
 
@@ -850,6 +855,7 @@
           <h2 id="insp-name">iPhone 15</h2>
           <div class="model" id="insp-model">iPhone16,1 · CH/A</div>
         </div>
+        <button class="icon-btn" id="insp-refresh" aria-label="刷新设备状态" title="刷新设备状态">↻</button>
         <span id="insp-badge" class="badge lock">激活锁</span>
         <button class="icon-btn insp-close" id="insp-close" aria-label="关闭详情">×</button>
       </div>
@@ -880,6 +886,18 @@
       <div class="quote" id="insp-quote">Activation Lock
 This iPhone is linked to an Apple account.
 d•••••@6•••••.com</div>
+
+      <div class="section-title" id="insp-machine-title" style="display:none">机器状态</div>
+      <dl class="kv" id="insp-machine" style="display:none">
+        <dt>擦除记录</dt><dd class="plain" id="insp-erase">—</dd>
+        <dt>内核崩溃</dt><dd class="plain" id="insp-panic">—</dd>
+        <dt>基带</dt><dd class="plain" id="insp-baseband">—</dd>
+        <dt>SIM</dt><dd class="plain" id="insp-sim">—</dd>
+        <dt>锁屏状态</dt><dd class="plain" id="insp-screen">—</dd>
+        <dt>启动参数</dt><dd class="plain" id="insp-bootargs">—</dd>
+        <dt>构建版本</dt><dd id="insp-build">—</dd>
+      </dl>
+      <div class="kv-hint" id="insp-lock-hint" style="display:none">已解锁状态下无法判断是否设置过锁屏密码。</div>
 
       <div class="section-title">处理建议</div>
       <ul class="advice" id="insp-advice"></ul>
@@ -1033,7 +1051,7 @@ d•••••@6•••••.com</div>
 </div>
 
 <script>
-const devices = [
+const demoDevices = [
   { id:"d1", name:"iPhone 15", model:"iPhone16,1 · CH/A", ios:"27.2", serial:"GN762JNQYM",
     imei:"355589712887838", source:"闲鱼", time:"11-21 13:42", status:"lock",
     stage:"testing", price:"¥2,150", seller:"陈先生",
@@ -1071,9 +1089,11 @@ const devices = [
     verdict:"未验证", hint:"设备已激活，需抹机后重新检测才能得出锁状态。", account:null }
 ];
 
-// The bundled rows are demo data: they disappear as soon as real hardware
-// shows up, but stay usable while nothing is connected.
-devices.forEach(d => { d.demo = true; });
+// The board starts empty and fills with real hardware. `?demo=1` loads the
+// bundled sample set for design review.
+const devices = [];
+demoDevices.forEach(d => { d.demo = true; });
+if (new URLSearchParams(location.search).has("demo")) devices.push(...demoDevices);
 
 const labels = { clean:"干净", lock:"激活锁", mdm:"MDM", unknown:"未验证" };
 let selectedId = "d1";
@@ -1106,12 +1126,13 @@ function renderTable(filter = "") {
   const list = devices.filter(d =>
     !q || [d.name, d.model, d.serial, d.source, d.imei].join(" ").toLowerCase().includes(q)
   );
+  const noneYet = devices.length === 0;
   rowsEl.innerHTML = list.length
     ? list.map(rowHTML).join("")
     : `<tr class="empty-row"><td colspan="7">
          <div class="empty">
-           <div class="t">没有匹配的设备</div>
-           <div class="hint">换个序列号、型号或来源试试。</div>
+           <div class="t">${noneYet ? "还没有设备" : "没有匹配的设备"}</div>
+           <div class="hint">${noneYet ? "插上 USB，或点右上角「登记收机」。" : "换个序列号、型号或来源试试。"}</div>
          </div>
        </td></tr>`;
   document.getElementById("table-foot").textContent =
@@ -1164,6 +1185,14 @@ function renderBoard() {
   });
 }
 
+function simLabel(status) {
+  if (!status || status === "—") return "—";
+  if (status.includes("Ready")) return "已就绪";
+  if (status.includes("NotInserted")) return "未插卡";
+  if (status.includes("InsertedWithSIM")) return "已插卡";
+  return status;
+}
+
 function selectDevice(id, open = true) {
   selectedId = id;
   const d = devices.find(x => x.id === id);
@@ -1211,6 +1240,46 @@ function selectDevice(id, open = true) {
         ? `已开启${d.findmyAccount ? " · " + d.findmyAccount : ""}`
         : "未开启")
     : "—";
+
+  const showMachine = d.real === true;
+  document.getElementById("insp-machine-title").style.display = showMachine ? "" : "none";
+  document.getElementById("insp-machine").style.display = showMachine ? "" : "none";
+  if (showMachine) {
+    const erase = document.getElementById("insp-erase");
+    erase.textContent = d.eraseAt
+      ? `${d.eraseAt} · ${d.eraseMethod || "未知方式"}`
+      : "无记录";
+    erase.className = "plain";
+
+    const panic = document.getElementById("insp-panic");
+    panic.textContent = d.panicRecords > 0 ? `有记录 · ${d.panicRecords} 条` : "无记录";
+    panic.className = "plain" + (d.panicRecords > 0 ? " warn" : "");
+
+    document.getElementById("insp-baseband").textContent =
+      `${d.basebandStatus} · ${d.basebandVersion}`;
+
+    const carrier = d.carrierMcc && d.carrierMnc ? ` · ${d.carrierMcc}/${d.carrierMnc}` : "";
+    document.getElementById("insp-sim").textContent = simLabel(d.simStatus) + carrier;
+
+    const screen = document.getElementById("insp-screen");
+    const lockHint = document.getElementById("insp-lock-hint");
+    if (d.activationState !== "Activated") {
+      screen.textContent = "不适用 · 未激活";
+      lockHint.style.display = "none";
+    } else if (d.screenLocked) {
+      screen.textContent = "已锁定 · 需要密码";
+      lockHint.style.display = "none";
+    } else {
+      screen.textContent = "已解锁";
+      lockHint.style.display = "";
+    }
+
+    const boot = document.getElementById("insp-bootargs");
+    boot.textContent = d.bootArgs ? `非空 · ${d.bootArgs}` : "正常";
+    boot.className = "plain" + (d.bootArgs ? " warn" : "");
+
+    document.getElementById("insp-build").textContent = d.buildVersion || "—";
+  }
 
   const badge = document.getElementById("insp-badge");
   badge.className = "badge " + d.status;
@@ -1644,6 +1713,18 @@ function deviceCard(entry) {
     account: null,
     findmyLocked: entry.findmy_locked === true,
     findmyAccount: entry.findmy_account || null,
+    eraseAt: entry.erase_at || null,
+    eraseMethod: entry.erase_method || null,
+    panicRecords: entry.panic_records || 0,
+    bootArgs: entry.boot_args || "",
+    screenLocked: entry.screen_locked === true,
+    activationState: entry.activation_state || "—",
+    buildVersion: entry.build_version || "—",
+    basebandStatus: entry.baseband_status || "—",
+    basebandVersion: entry.baseband_version || "—",
+    simStatus: entry.sim_status || "—",
+    carrierMcc: entry.carrier_mcc || null,
+    carrierMnc: entry.carrier_mnc || null,
   };
 }
 
@@ -1701,6 +1782,18 @@ async function refreshRealDevices() {
           existing.imei = entry.imei;
           existing.findmyLocked = entry.findmy_locked === true;
           existing.findmyAccount = entry.findmy_account || null;
+          existing.eraseAt = entry.erase_at || null;
+          existing.eraseMethod = entry.erase_method || null;
+          existing.panicRecords = entry.panic_records || 0;
+          existing.bootArgs = entry.boot_args || "";
+          existing.screenLocked = entry.screen_locked === true;
+          existing.activationState = entry.activation_state || "—";
+          existing.buildVersion = entry.build_version || "—";
+          existing.basebandStatus = entry.baseband_status || "—";
+          existing.basebandVersion = entry.baseband_version || "—";
+          existing.simStatus = entry.sim_status || "—";
+          existing.carrierMcc = entry.carrier_mcc || null;
+          existing.carrierMnc = entry.carrier_mnc || null;
         } else {
           devices.unshift(deviceCard(entry));
         }
@@ -2084,7 +2177,7 @@ function switchView(name) {
       ? `${devices.length} 台本周收机 · ${pendingCount()} 台待处理`
       : s;
   appEl.classList.remove("inspecting");
-  appEl.classList.toggle("no-inspector", name !== "devices");
+  appEl.classList.toggle("no-inspector", name !== "devices" || devices.length === 0);
   appEl.classList.remove("overlay-inspector");
   if (name === "recycle") renderBoard();
   if (name === "batch") renderBatch();
@@ -2180,6 +2273,18 @@ document.getElementById("insp-close").addEventListener("click", () => {
   if (document.getElementById("view-recycle").classList.contains("active")) {
     appEl.classList.add("no-inspector");
   }
+});
+
+document.getElementById("insp-refresh").addEventListener("click", async () => {
+  const id = current?.id;
+  const button = document.getElementById("insp-refresh");
+  const keepOpen = !appEl.classList.contains("no-inspector")
+    || appEl.classList.contains("overlay-inspector");
+  button.disabled = true;
+  await refreshRealDevices();
+  button.disabled = false;
+  if (id && devices.some(d => d.id === id)) selectDevice(id, keepOpen);
+  toast("已刷新设备状态");
 });
 </script>
 </body>
