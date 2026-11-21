@@ -196,6 +196,8 @@
     background: var(--accent); color: #fff; border-color: var(--accent);
   }
   .btn-primary:hover { filter: brightness(1.06); }
+  .btn.danger { color: var(--lock); border-color: var(--lock); }
+  .btn.danger:hover { background: var(--lock-soft); }
   [data-theme="dark"] .btn-primary { color: #0C1311; }
 
   .table-foot {
@@ -1011,6 +1013,8 @@ d•••••@6•••••.com</div>
       <div class="hw-empty" id="insp-hw-summary">尚未体检</div>
       <button class="btn" id="insp-hw-open" style="width:100%;margin-top:6px">开始硬件体检</button>
 
+      <button class="btn" id="insp-delete" style="width:100%;margin-top:14px;display:none">删除这台设备</button>
+
       <div class="section-title">处理建议</div>
       <ul class="advice" id="insp-advice"></ul>
     </div>
@@ -1315,8 +1319,16 @@ const stages = [
 
 function renderBoard() {
   const board = document.getElementById("board");
+  const query = (document.getElementById("search").value || "").trim().toLowerCase();
+  const matches = d =>
+    !query ||
+    [d.name, d.model, d.serial, d.imei, d.udid, d.source, d.seller]
+      .join(" ")
+      .toLowerCase()
+      .includes(query);
+
   board.innerHTML = stages.map(s => {
-    const list = devices.filter(d => d.stage === s.key);
+    const list = devices.filter(d => d.stage === s.key && matches(d));
     const cards = list.map(d => `
       <button class="card ${d.status} ${d.id === selectedId ? "selected" : ""}" data-id="${d.id}">
         <span class="top"><span class="name">${d.name}</span><span class="price">${d.price}</span></span>
@@ -1325,7 +1337,7 @@ function renderBoard() {
       </button>`).join("");
     return `<section class="col">
       <header class="col-head"><span class="col-name">${s.name}</span><span class="col-count">${list.length}</span></header>
-      <div class="cards">${cards || '<div class="col-empty">暂无设备</div>'}</div>
+      <div class="cards">${cards || `<div class="col-empty">${query ? "无匹配" : "暂无设备"}</div>`}</div>
     </section>`;
   }).join("");
   board.querySelectorAll(".card").forEach(card => {
@@ -1437,6 +1449,12 @@ function selectDevice(id, open = true) {
   const hardwareSummary = hwSummary(d);
   document.getElementById("insp-hw-summary").textContent = hardwareSummary || "尚未体检";
   document.getElementById("insp-hw-open").textContent = hardwareSummary ? "重新体检" : "开始硬件体检";
+
+  const deleteButton = document.getElementById("insp-delete");
+  deleteButton.style.display = d.real ? "none" : "";
+  deleteButton.textContent = "删除这台设备";
+  deleteButton.classList.remove("danger");
+  deleteArmedFor = null;
 
   const badge = document.getElementById("insp-badge");
   badge.className = "badge " + d.status;
@@ -3190,7 +3208,10 @@ document.querySelectorAll(".nav-item").forEach(btn => {
   btn.addEventListener("click", () => switchView(btn.dataset.view));
 });
 
-document.getElementById("search").addEventListener("input", e => renderTable(e.target.value));
+document.getElementById("search").addEventListener("input", e => {
+  renderTable(e.target.value);
+  renderBoard();
+});
 
 document.getElementById("theme-btn").addEventListener("click", () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
@@ -3266,8 +3287,7 @@ loadPrices();
 setInterval(() => { if (!document.hidden) refreshRealDevices(); }, 4000);
 window.addEventListener("focus", refreshRealDevices);
 
-document.getElementById("insp-close").addEventListener("click", () => {
-  appEl.classList.remove("inspecting", "overlay-inspector");
+document.getElementById("insp-close").addEventListener("click", () => {  appEl.classList.remove("inspecting", "overlay-inspector");
   if (document.getElementById("view-recycle").classList.contains("active")) {
     appEl.classList.add("no-inspector");
   }
@@ -3283,6 +3303,41 @@ document.getElementById("insp-refresh").addEventListener("click", async () => {
   button.disabled = false;
   if (id && devices.some(d => d.id === id)) selectDevice(id, keepOpen);
   toast("已刷新设备状态");
+});
+
+let deleteArmedFor = null;
+
+document.getElementById("insp-delete").addEventListener("click", () => {
+  const d = current;
+  if (!d || d.real) return;
+  const button = document.getElementById("insp-delete");
+
+  if (deleteArmedFor !== d.id) {
+    deleteArmedFor = d.id;
+    button.textContent = "再点一次确认删除";
+    button.classList.add("danger");
+    setTimeout(() => {
+      if (deleteArmedFor === d.id) {
+        deleteArmedFor = null;
+        button.textContent = "删除这台设备";
+        button.classList.remove("danger");
+      }
+    }, 3000);
+    return;
+  }
+
+  deleteArmedFor = null;
+  const index = devices.findIndex(item => item.id === d.id);
+  if (index >= 0) devices.splice(index, 1);
+  if (selectedId === d.id) selectedId = devices[0]?.id;
+
+  saveManualDevices();
+  appEl.classList.remove("inspecting", "overlay-inspector");
+  renderTable();
+  renderBoard();
+  updateStats();
+  if (selectedId) selectDevice(selectedId, false);
+  toast(`${d.name} 已删除`);
 });
 </script>
 </body>
