@@ -188,6 +188,45 @@ def save_store(devices: list[dict]) -> None:
     os.replace(tmp, path)
 
 
+async def hardware(udid: str) -> dict:
+    """Battery readings from the diagnostics service.
+
+    Works on unactivated devices too, which is what a recycler usually has in
+    hand. Capacity fields live in the nested BatteryData dictionary on modern
+    iOS; the top-level keys are mostly empty there.
+    """
+    from pymobiledevice3.lockdown import create_using_usbmux
+    from pymobiledevice3.services.diagnostics import DiagnosticsService
+
+    lockdown = await create_using_usbmux(serial=udid)
+    service = DiagnosticsService(lockdown)
+    battery = await service.get_battery()
+
+    data = battery.get("BatteryData") or {}
+    design = data.get("DesignCapacity")
+    full = data.get("FullChargeCapacity") or data.get("AppleRawMaxCapacity")
+    health = round(full / design * 100) if design and full else None
+
+    vendor = battery.get("ManufacturerData")
+    if isinstance(vendor, (bytes, bytearray)):
+        vendor = vendor.split(b"\x00", 1)[0].decode("utf-8", "replace").strip() or None
+    else:
+        vendor = None
+
+    return {
+        "cycle_count": battery.get("CycleCount"),
+        "design_capacity": design,
+        "full_capacity": full,
+        "health_percent": health,
+        "voltage_mv": battery.get("Voltage"),
+        "charge_percent": battery.get("CurrentCapacity"),
+        "charging": battery.get("IsCharging") is True,
+        "external_connected": battery.get("ExternalConnected") is True,
+        "battery_serial": battery.get("Serial"),
+        "battery_vendor": vendor,
+    }
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
@@ -213,6 +252,17 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             try:
                 self._send_json({"ok": True, "probe": asyncio.run(inspect(udid))})
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+            return
+
+        if parsed.path == "/api/hardware":
+            udid = (parse_qs(parsed.query).get("udid") or [""])[0]
+            if not udid:
+                self._send_json({"ok": False, "error": "udid required"}, 400)
+                return
+            try:
+                self._send_json({"ok": True, "hardware": asyncio.run(hardware(udid))})
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, 500)
             return

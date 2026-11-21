@@ -560,6 +560,33 @@
   .margin-box .k { font-size: 11px; color: var(--ink-3); }
   .margin-box .v { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
+  /* ---------------- hardware check ---------------- */
+  .hw-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .hw-tile {
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; background: var(--surface-2);
+  }
+  .hw-tile .k { font-size: 11px; color: var(--ink-3); }
+  .hw-tile .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .hw-tile .s { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+  .hw-tile.good .v { color: var(--clean); }
+  .hw-tile.warn .v { color: #B07A1E; }
+  .hw-tile.bad .v { color: var(--lock); }
+  .hw-empty { font-size: 12px; color: var(--ink-3); padding: 8px 0; }
+
+  .check-list { display: flex; flex-direction: column; }
+  .check-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 0; border-bottom: 1px solid var(--line);
+  }
+  .check-row:last-child { border-bottom: 0; }
+  .check-row .name { flex: 1; font-size: 12.5px; }
+  .seg-mini { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg-mini button { padding: 3px 9px; font-size: 11.5px; background: var(--surface-2); color: var(--ink-2); }
+  .seg-mini button + button { border-left: 1px solid var(--line); }
+  .seg-mini button.ok[aria-pressed="true"] { background: var(--clean-soft); color: var(--clean); font-weight: 600; }
+  .seg-mini button.bad[aria-pressed="true"] { background: var(--lock-soft); color: var(--lock); font-weight: 600; }
+
   /* ---------------- states & motion ---------------- */
   tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
@@ -886,8 +913,7 @@
 This iPhone is linked to an Apple account.
 d•••••@6•••••.com</div>
 
-      <div class="section-title" id="insp-machine-title" style="display:none">机器状态</div>
-      <dl class="kv" id="insp-machine" style="display:none">
+      <div class="section-title" id="insp-machine-title" style="display:none">机器状态</div>      <dl class="kv" id="insp-machine" style="display:none">
         <dt>擦除记录</dt><dd class="plain" id="insp-erase">—</dd>
         <dt>内核崩溃</dt><dd class="plain" id="insp-panic">—</dd>
         <dt>基带</dt><dd class="plain" id="insp-baseband">—</dd>
@@ -897,6 +923,10 @@ d•••••@6•••••.com</div>
         <dt>构建版本</dt><dd id="insp-build">—</dd>
       </dl>
       <div class="kv-hint" id="insp-lock-hint" style="display:none">已解锁状态下无法判断是否设置过锁屏密码。</div>
+
+      <div class="section-title">硬件体检</div>
+      <div class="hw-empty" id="insp-hw-summary">尚未体检</div>
+      <button class="btn" id="insp-hw-open" style="width:100%;margin-top:6px">开始硬件体检</button>
 
       <div class="section-title">处理建议</div>
       <ul class="advice" id="insp-advice"></ul>
@@ -1047,6 +1077,26 @@ d•••••@6•••••.com</div>
       <button type="submit" class="btn btn-primary">确认售出</button>
     </div>
   </form>
+</div>
+
+<div class="modal" id="hw-modal" role="dialog" aria-modal="true" aria-labelledby="hw-title">
+  <div class="modal-head">
+    <h3 id="hw-title">硬件体检</h3>
+    <span class="hint" id="hw-sub">—</span>
+    <span style="flex:1"></span>
+    <button class="icon-btn" id="hw-close" aria-label="关闭">×</button>
+  </div>
+  <div class="modal-body" style="display:block">
+    <div class="section-title" style="margin-top:0">电池 · 自动读取</div>
+    <div class="hw-grid" id="hw-battery"></div>
+
+    <div class="section-title">人工检查</div>
+    <div class="check-list" id="hw-checks"></div>
+  </div>
+  <div class="modal-foot">
+    <button type="button" class="btn" id="hw-cancel">取消</button>
+    <button type="button" class="btn btn-primary" id="hw-save">保存结果</button>
+  </div>
 </div>
 
 <script>
@@ -1279,6 +1329,10 @@ function selectDevice(id, open = true) {
 
     document.getElementById("insp-build").textContent = d.buildVersion || "—";
   }
+
+  const hardwareSummary = hwSummary(d);
+  document.getElementById("insp-hw-summary").textContent = hardwareSummary || "尚未体检";
+  document.getElementById("insp-hw-open").textContent = hardwareSummary ? "重新体检" : "开始硬件体检";
 
   const badge = document.getElementById("insp-badge");
   badge.className = "badge " + d.status;
@@ -2091,6 +2145,145 @@ document.getElementById("sale-form").addEventListener("submit", e => {
 document.getElementById("sale-close").addEventListener("click", closeSale);
 document.getElementById("sale-cancel").addEventListener("click", closeSale);
 
+const HW_CHECKS = [
+  ["screen", "屏幕显示与触控"],
+  ["front_cam", "前置摄像头"],
+  ["rear_cam", "后置摄像头"],
+  ["biometrics", "Face ID / 触控 ID"],
+  ["speaker", "扬声器"],
+  ["mic", "麦克风"],
+  ["buttons", "按键与静音键"],
+  ["port", "充电口"],
+  ["haptics", "振动"],
+  ["radios", "Wi-Fi 与蜂窝"],
+];
+
+let hwDevice = null;
+let hwState = { battery: null, checks: {} };
+
+function renderHwBattery() {
+  const el = document.getElementById("hw-battery");
+  const b = hwState.battery;
+  if (!b) {
+    el.innerHTML = `<div class="hw-empty">${
+      hwDevice && hwDevice.real ? "" : "手工登记的设备没有电池数据，只能做人工检查"
+    }</div>`;
+    return;
+  }
+  const health = b.health_percent;
+  const cls = health == null ? "" : health >= 90 ? "good" : health >= 80 ? "warn" : "bad";
+  el.innerHTML = `
+    <div class="hw-tile ${cls}">
+      <div class="k">电池健康</div>
+      <div class="v">${health == null ? "—" : health + "%"}</div>
+      <div class="s">${b.full_capacity || "—"} / ${b.design_capacity || "—"} mAh</div>
+    </div>
+    <div class="hw-tile">
+      <div class="k">循环次数</div>
+      <div class="v">${b.cycle_count == null ? "—" : b.cycle_count}</div>
+      <div class="s">${b.charging ? "正在充电" : b.external_connected ? "已接电源" : "电池供电"}</div>
+    </div>
+    <div class="hw-tile">
+      <div class="k">电量</div>
+      <div class="v">${b.charge_percent == null ? "—" : b.charge_percent + "%"}</div>
+      <div class="s">${b.voltage_mv ? b.voltage_mv + " mV" : ""}</div>
+    </div>`;
+}
+
+function renderHwChecks() {
+  const el = document.getElementById("hw-checks");
+  el.innerHTML = HW_CHECKS.map(([key, label]) => {
+    const value = hwState.checks[key] || "";
+    const button = (val, text, cls) =>
+      `<button type="button" class="${cls}" data-key="${key}" data-val="${val}" aria-pressed="${value === val}">${text}</button>`;
+    return `<div class="check-row">
+      <span class="name">${label}</span>
+      <div class="seg-mini">${button("ok", "正常", "ok")}${button("bad", "异常", "bad")}${button("", "未测", "")}</div>
+    </div>`;
+  }).join("");
+
+  el.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.key;
+      if (btn.dataset.val) hwState.checks[key] = btn.dataset.val;
+      else delete hwState.checks[key];
+      renderHwChecks();
+    });
+  });
+}
+
+function hwSummary(d) {
+  const hw = d.hardware;
+  if (!hw) return null;
+  const parts = [];
+  if (hw.battery && hw.battery.health_percent != null) {
+    parts.push(`电池 ${hw.battery.health_percent}%`);
+  }
+  const values = Object.values(hw.checks || {});
+  if (values.length) {
+    const ok = values.filter(v => v === "ok").length;
+    const bad = values.filter(v => v === "bad").length;
+    parts.push(`人工项 ${ok} 正常${bad ? ` · ${bad} 异常` : ""}`);
+  }
+  return parts.join(" · ") || null;
+}
+
+async function openHardware(d) {
+  hwDevice = d;
+  hwState = {
+    battery: d.hardware?.battery || null,
+    checks: { ...(d.hardware?.checks || {}) },
+  };
+  document.getElementById("hw-sub").textContent = `${d.name} · ${d.serial}`;
+  renderHwChecks();
+  renderHwBattery();
+  document.getElementById("scrim").classList.add("show");
+  document.getElementById("hw-modal").classList.add("show");
+
+  if (!d.real || !d.udid) return;
+
+  document.getElementById("hw-battery").innerHTML = `<div class="hw-empty">正在读取电池数据…</div>`;
+  try {
+    const res = await fetch(`${API_BASE}/api/hardware?udid=${encodeURIComponent(d.udid)}`, {
+      cache: "no-store",
+    });
+    const data = await res.json();
+    if (data.ok) {
+      hwState.battery = data.hardware;
+      renderHwBattery();
+    } else {
+      document.getElementById("hw-battery").innerHTML =
+        `<div class="hw-empty">读取失败：${data.error || "未知错误"}</div>`;
+    }
+  } catch (err) {
+    document.getElementById("hw-battery").innerHTML = `<div class="hw-empty">连不上本地桥</div>`;
+  }
+}
+
+function closeHardware() {
+  document.getElementById("scrim").classList.remove("show");
+  document.getElementById("hw-modal").classList.remove("show");
+}
+
+document.getElementById("insp-hw-open").addEventListener("click", () => {
+  if (current) openHardware(current);
+});
+
+document.getElementById("hw-save").addEventListener("click", () => {
+  const d = hwDevice;
+  if (!d) return;
+  d.hardware = { battery: hwState.battery, checks: { ...hwState.checks } };
+  saveManualDevices();
+  closeHardware();
+  renderTable();
+  renderBoard();
+  if (current?.id === d.id) selectDevice(d.id, false);
+  toast("硬件体检已保存");
+});
+
+document.getElementById("hw-close").addEventListener("click", closeHardware);
+document.getElementById("hw-cancel").addEventListener("click", closeHardware);
+
 const gradeButtons = document.querySelectorAll("#f-grade button");
 gradeButtons.forEach(btn => {
   btn.addEventListener("click", () => {
@@ -2152,6 +2345,7 @@ document.getElementById("scrim").addEventListener("click", () => {
   closeIntake();
   closePrice();
   closeSale();
+  closeHardware();
 });
 
 const titles = {
@@ -2210,6 +2404,7 @@ document.addEventListener("keydown", e => {
     if (document.getElementById("intake-modal").classList.contains("show")) closeIntake();
     if (document.getElementById("price-modal").classList.contains("show")) closePrice();
     if (document.getElementById("sale-modal").classList.contains("show")) closeSale();
+    if (document.getElementById("hw-modal").classList.contains("show")) closeHardware();
   }
 });
 
