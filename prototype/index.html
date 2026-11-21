@@ -724,6 +724,7 @@
     <button class="nav-item" data-view="recycle" aria-current="page">回收<span class="nav-count" id="nav-recycle-count">4</span></button>
     <button class="nav-item" data-view="devices">设备<span class="nav-count" id="nav-devices-count">8</span></button>
     <button class="nav-item" data-view="prices">价格</button>
+    <button class="nav-item" data-view="stats">统计</button>
     <button class="nav-item" data-view="report">报告<span class="nav-count">28</span></button>
     <button class="nav-item" data-view="batch">批量</button>
 
@@ -782,7 +783,7 @@
       <!-- recycle -->
       <section class="view active" id="view-recycle">
         <div class="period-bar">
-          <div class="seg-mini" id="period-seg" role="group" aria-label="统计周期">
+          <div class="seg-mini period-seg" id="period-seg" role="group" aria-label="统计周期">
             <button type="button" data-period="today" aria-pressed="false">今天</button>
             <button type="button" data-period="week" aria-pressed="true">本周</button>
             <button type="button" data-period="month" aria-pressed="false">本月</button>
@@ -867,6 +868,30 @@
         </div>
         <div class="report-wrap">
           <article class="sheet" id="report-sheet"></article>
+        </div>
+      </section>
+
+      <!-- stats -->
+      <section class="view" id="view-stats">
+        <div class="period-bar">
+          <div class="seg-mini period-seg" role="group" aria-label="统计周期">
+            <button type="button" data-period="today" aria-pressed="false">今天</button>
+            <button type="button" data-period="week" aria-pressed="true">本周</button>
+            <button type="button" data-period="month" aria-pressed="false">本月</button>
+            <button type="button" data-period="all" aria-pressed="false">全部</button>
+          </div>
+          <span class="muted" id="stats-summary">—</span>
+        </div>
+        <div class="table-wrap">
+          <table class="batch-table">
+            <thead>
+              <tr>
+                <th>机型</th><th>收机</th><th>售出</th>
+                <th>回收额</th><th>毛利</th><th>平均电池</th>
+              </tr>
+            </thead>
+            <tbody id="stats-rows"></tbody>
+          </table>
         </div>
       </section>
 
@@ -1817,15 +1842,93 @@ function updateStats() {
   }
 }
 
-document.querySelectorAll("#period-seg button").forEach(button => {
+function syncPeriodButtons() {
+  document.querySelectorAll(".period-seg button").forEach(item => {
+    item.setAttribute("aria-pressed", String(item.dataset.period === statPeriod));
+  });
+}
+
+document.querySelectorAll(".period-seg button").forEach(button => {
   button.addEventListener("click", () => {
     statPeriod = button.dataset.period;
-    document.querySelectorAll("#period-seg button").forEach(item => {
-      item.setAttribute("aria-pressed", String(item === button));
-    });
+    syncPeriodButtons();
     updateStats();
+    renderStats();
   });
 });
+
+function deviceType(d) {
+  if (d.productType) return d.productType;
+  const head = String(d.model || "").split(" · ")[0];
+  return head && head !== "—" ? head : "unknown";
+}
+
+function renderStats() {
+  const tbody = document.getElementById("stats-rows");
+  const summary = document.getElementById("stats-summary");
+  const start = periodStart(statPeriod);
+  const label = { today: "今日", week: "本周", month: "本月", all: "累计" }[statPeriod];
+
+  syncPeriodButtons();
+
+  if (!devices.length) {
+    summary.textContent = "—";
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="6"><div class="empty">
+      <div class="t">还没有设备</div>
+      <div class="hint">收机之后，这里会按机型汇总。</div></div></td></tr>`;
+    return;
+  }
+
+  const groups = new Map();
+  devices.forEach(d => {
+    const type = deviceType(d);
+    if (!groups.has(type)) {
+      groups.set(type, { type, received: 0, sold: 0, amount: 0, margin: 0, healthSum: 0, healthCount: 0 });
+    }
+    const group = groups.get(type);
+
+    if (inPeriod(d.createdAt, start)) {
+      group.received += 1;
+      group.amount += priceValue(d);
+    }
+    if (d.stage === "sold" && inPeriod(d.soldAt || d.createdAt, start)) {
+      group.sold += 1;
+      if (typeof d.margin === "number") group.margin += d.margin;
+    }
+    const health = d.hardware?.battery?.health_percent;
+    if (typeof health === "number") {
+      group.healthSum += health;
+      group.healthCount += 1;
+    }
+  });
+
+  const rows = [...groups.values()].sort(
+    (a, b) => b.received - a.received || b.amount - a.amount
+  );
+
+  tbody.innerHTML = rows
+    .map(group => {
+      const health = group.healthCount
+        ? Math.round(group.healthSum / group.healthCount) + "%"
+        : "—";
+      return `<tr>
+        <td>${esc(modelName(group.type))}<div class="batch-sub">${esc(group.type)}</div></td>
+        <td class="mono">${group.received}</td>
+        <td class="mono">${group.sold}</td>
+        <td class="mono">¥${group.amount.toLocaleString("en-US")}</td>
+        <td class="mono">¥${group.margin.toLocaleString("en-US")}</td>
+        <td class="mono">${health}</td>
+      </tr>`;
+    })
+    .join("");
+
+  const totalReceived = rows.reduce((sum, group) => sum + group.received, 0);
+  const totalSold = rows.reduce((sum, group) => sum + group.sold, 0);
+  const totalMargin = rows.reduce((sum, group) => sum + group.margin, 0);
+  summary.textContent =
+    `${label}：${rows.length} 个机型 · 收机 ${totalReceived} 台 · ` +
+    `售出 ${totalSold} 台 · 毛利 ¥${totalMargin.toLocaleString("en-US")}`;
+}
 
 async function loadModelOptions() {
   try {
@@ -3048,6 +3151,7 @@ const titles = {
   recycle: ["回收", "本周收机 8 台 · 4 台待处理"],
   batch: ["批量", "勾选设备，顺序检测并自动分流"],
   prices: ["价格", "回收价按机型、容量、成色分档"],
+  stats: ["统计", "按机型汇总收机、售出与毛利"],
   inspect: ["验机", "iPhone 15 · 第 3 步 / 共 5 步"],
   report: ["报告", "已生成 28 份 · 最近 11-21 13:42"]
 };
@@ -3076,6 +3180,7 @@ function switchView(name) {
   if (name === "batch") renderBatch();
   if (name === "report") renderReport(current);
   if (name === "prices") renderPrices();
+  if (name === "stats") renderStats();
 }
 
 document.querySelectorAll(".nav-item").forEach(btn => {
