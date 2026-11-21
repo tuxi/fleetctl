@@ -450,6 +450,12 @@
     border-radius: 6px; padding: 4px 7px; text-align: right;
     font-variant-numeric: tabular-nums;
   }
+
+  .period-bar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 22px;
+    border-bottom: 1px solid var(--line);
+  }
   .sheet-foot { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--line);
     display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
 
@@ -775,11 +781,20 @@
 
       <!-- recycle -->
       <section class="view active" id="view-recycle">
+        <div class="period-bar">
+          <div class="seg-mini" id="period-seg" role="group" aria-label="统计周期">
+            <button type="button" data-period="today" aria-pressed="false">今天</button>
+            <button type="button" data-period="week" aria-pressed="true">本周</button>
+            <button type="button" data-period="month" aria-pressed="false">本月</button>
+            <button type="button" data-period="all" aria-pressed="false">全部</button>
+          </div>
+          <span class="muted" id="period-hint">按入库时间统计</span>
+        </div>
         <div class="stats">
-          <div class="stat"><div class="v" id="stat-total">8</div><div class="l">本周收机</div></div>
+          <div class="stat"><div class="v" id="stat-total">8</div><div class="l" id="stat-total-label">本周收机</div></div>
           <div class="stat"><div class="v" id="stat-pending">4</div><div class="l">待处理</div></div>
-          <div class="stat"><div class="v" id="stat-sold">0</div><div class="l">已售出</div></div>
-          <div class="stat"><div class="v" id="stat-amount">¥18,020</div><div class="l">本周回收额</div></div>
+          <div class="stat"><div class="v" id="stat-sold">0</div><div class="l" id="stat-sold-label">已售出</div></div>
+          <div class="stat"><div class="v" id="stat-amount">¥18,020</div><div class="l" id="stat-amount-label">本周回收额</div></div>
         </div>
         <div class="board" id="board"></div>
       </section>
@@ -1201,7 +1216,10 @@ const demoDevices = [
 const devices = [];
 let modelCatalog = [];
 let priceRows = [];
-demoDevices.forEach(d => { d.demo = true; });
+demoDevices.forEach(d => {
+  d.demo = true;
+  d.createdAt = d.createdAt || new Date().toISOString();
+});
 if (new URLSearchParams(location.search).has("demo")) devices.push(...demoDevices);
 
 const labels = { clean:"干净", lock:"激活锁", mdm:"MDM", unknown:"未验证" };
@@ -1740,23 +1758,74 @@ function pendingCount() {
   return devices.filter(d => ["await", "testing", "pricing"].includes(d.stage)).length;
 }
 
+let statPeriod = "week";
+
+function periodStart(period) {
+  const now = new Date();
+  if (period === "today") {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+  if (period === "week") {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+    return start;
+  }
+  if (period === "month") {
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+  return null;
+}
+
+function inPeriod(stamp, start) {
+  if (!start) return true;
+  if (!stamp) return false;
+  const date = stamp.length === 10 ? new Date(`${stamp}T00:00:00`) : new Date(stamp);
+  return !Number.isNaN(date.getTime()) && date >= start;
+}
+
+function priceValue(d) {
+  return Number(String(d.price || "").replace(/[^\d]/g, "") || 0);
+}
+
 function updateStats() {
+  const start = periodStart(statPeriod);
+  const label = { today: "今日", week: "本周", month: "本月", all: "累计" }[statPeriod];
   const pending = pendingCount();
-  const sold = devices.filter(d => d.stage === "sold").length;
-  const amount = devices.reduce(
-    (sum, d) => sum + Number(String(d.price).replace(/[^\d]/g, "") || 0), 0
+  const received = devices.filter(d => inPeriod(d.createdAt, start));
+  const sold = devices.filter(
+    d => d.stage === "sold" && inPeriod(d.soldAt || d.createdAt, start)
   );
-  document.getElementById("stat-total").textContent = devices.length;
+  const amount = received.reduce((sum, d) => sum + priceValue(d), 0);
+
+  document.getElementById("stat-total").textContent = received.length;
+  document.getElementById("stat-total-label").textContent = `${label}收机`;
   document.getElementById("stat-pending").textContent = pending;
-  document.getElementById("stat-sold").textContent = sold;
+  document.getElementById("stat-sold").textContent = sold.length;
+  document.getElementById("stat-sold-label").textContent = `${label}售出`;
   document.getElementById("stat-amount").textContent = "¥" + amount.toLocaleString("en-US");
+  document.getElementById("stat-amount-label").textContent = `${label}回收额`;
+
   document.getElementById("nav-recycle-count").textContent = pending;
   document.getElementById("nav-devices-count").textContent = devices.length;
+
   if (document.getElementById("view-recycle").classList.contains("active")) {
     document.getElementById("view-sub").textContent =
-      `${devices.length} 台本周收机 · ${pending} 台待处理`;
+      `${received.length} 台${label}收机 · ${pending} 台待处理`;
   }
 }
+
+document.querySelectorAll("#period-seg button").forEach(button => {
+  button.addEventListener("click", () => {
+    statPeriod = button.dataset.period;
+    document.querySelectorAll("#period-seg button").forEach(item => {
+      item.setAttribute("aria-pressed", String(item === button));
+    });
+    updateStats();
+  });
+});
 
 async function loadModelOptions() {
   try {
@@ -2100,6 +2169,7 @@ function deviceCard(entry) {
     time: "已连接",
     status: "unknown",
     stage: "await",
+    createdAt: new Date().toISOString(),
     price: "—",
     seller: "本机",
     verdict: "未验证",
@@ -2941,6 +3011,7 @@ document.getElementById("intake-form").addEventListener("submit", e => {
     time: "刚刚",
     status: "unknown",
     stage: "await",
+    createdAt: new Date().toISOString(),
     productType: type,
     capacity: storage,
     grade,
@@ -2998,7 +3069,10 @@ function switchView(name) {
   appEl.classList.remove("inspecting");
   appEl.classList.toggle("no-inspector", name !== "devices" || devices.length === 0);
   appEl.classList.remove("overlay-inspector");
-  if (name === "recycle") renderBoard();
+  if (name === "recycle") {
+    updateStats();
+    renderBoard();
+  }
   if (name === "batch") renderBatch();
   if (name === "report") renderReport(current);
   if (name === "prices") renderPrices();
