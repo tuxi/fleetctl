@@ -978,6 +978,7 @@
       <div class="section-title">设备信息</div>
       <dl class="kv">
         <dt>序列号</dt><dd id="insp-serial">GN762JNQYM</dd>
+        <dt>UDID</dt><dd id="insp-udid">—</dd>
         <dt>IMEI</dt><dd id="insp-imei">355589712887838</dd>
         <dt>系统</dt><dd id="insp-ios">iOS 27.2</dd>
         <dt>来源</dt><dd class="plain" id="insp-source">闲鱼</dd>
@@ -1357,6 +1358,7 @@ function selectDevice(id, open = true) {
   document.getElementById("insp-name").textContent = d.name;
   document.getElementById("insp-model").textContent = d.model;
   document.getElementById("insp-serial").textContent = d.serial;
+  document.getElementById("insp-udid").textContent = d.udid || "—";
   document.getElementById("insp-imei").textContent = d.imei;
   document.getElementById("insp-ios").textContent = "iOS " + d.ios;
   document.getElementById("insp-source").textContent = d.source;
@@ -2833,6 +2835,7 @@ function reportData(d) {
       name: d.name,
       model: d.model,
       serial: d.serial,
+      udid: d.udid || null,
       imei: d.imei,
       ios: d.ios,
       build: d.buildVersion || null,
@@ -2902,6 +2905,7 @@ function renderReport(d) {
     <table>
       <tr><th>机型</th><td>${esc(d.name)}（${esc(d.model)}）</td><th>序列号</th><td class="mono">${esc(d.serial)}</td></tr>
       <tr><th>IMEI</th><td class="mono">${esc(d.imei)}</td><th>系统</th><td>${esc(ios)}</td></tr>
+      ${d.udid ? `<tr><th>UDID</th><td class="mono" colspan="3">${esc(d.udid)}</td></tr>` : ""}
     </table>`);
 
   parts.push(`<h4>结论</h4>
