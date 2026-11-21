@@ -1530,6 +1530,7 @@ function toast(msg) {
 }
 
 let inspectDevice = null;
+let wizStage = "lock";
 
 const VERDICTS = {
   clean: {
@@ -1664,8 +1665,6 @@ async function runInspection(d) {
   }
 
   showVerdict(d, result);
-  setSteps(3, 2);
-
   document.getElementById("wiz-elapsed").textContent =
     ((performance.now() - start) / 1000).toFixed(1) + "s";
   document.getElementById("wiz-time").textContent = d.time;
@@ -1777,27 +1776,45 @@ function showVerdict(d, result) {
 
   const action = document.getElementById("wiz-action");
   action.disabled = false;
-  action.textContent = V.action;
+
+  if (d.hardware) {
+    setSteps(5, 4);
+    wizStage = "report";
+    action.textContent = "生成报告";
+    document.getElementById("wiz-sub").textContent = `${d.model} · 第 5 步 / 共 5 步`;
+  } else {
+    setSteps(3, 2);
+    wizStage = "lock";
+    action.textContent = "下一步：硬件体检";
+    document.getElementById("wiz-sub").textContent = `${d.model} · 第 3 步 / 共 5 步`;
+  }
 }
 
-document.getElementById("wiz-action").addEventListener("click", () => {
+async function archiveReport(d) {
+  try {
+    await fetch(`${API_BASE}/api/reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device: d, report: reportData(d) }),
+    });
+  } catch (err) {
+    // Archiving is best-effort.
+  }
+}
+
+document.getElementById("wiz-action").addEventListener("click", async () => {
   const d = inspectDevice;
   if (!d) return;
-  if (d.status === "unknown") {
-    runInspection(d);
+
+  if (wizStage === "report") {
+    await archiveReport(d);
+    switchView("report");
+    renderReport(d);
+    toast("报告已生成");
     return;
   }
-  if (d.status === "clean") {
-    d.stage = "pricing";
-    toast(`${d.name} 已进入待定价`);
-  } else {
-    d.stage = "returned";
-    toast(`${d.name} 已标记退货`);
-  }
-  renderBoard();
-  renderTable();
-  updateStats();
-  switchView("recycle");
+
+  openHardware(d);
 });
 
 document.getElementById("wiz-back").addEventListener("click", () => switchView("recycle"));
@@ -2865,6 +2882,20 @@ document.getElementById("hw-save").addEventListener("click", () => {
   renderTable();
   renderBoard();
   if (current?.id === d.id) selectDevice(d.id, false);
+
+  if (
+    document.getElementById("view-inspect").classList.contains("active") &&
+    inspectDevice &&
+    inspectDevice.id === d.id
+  ) {
+    setSteps(5, 4);
+    wizStage = "report";
+    const action = document.getElementById("wiz-action");
+    action.disabled = false;
+    action.textContent = "生成报告";
+    document.getElementById("wiz-sub").textContent = `${d.model} · 第 5 步 / 共 5 步`;
+  }
+
   toast("硬件体检已保存");
 });
 
