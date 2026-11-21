@@ -35,6 +35,21 @@ STATUS = {
     "undetermined": "unknown",
 }
 
+MODELS_PATH = os.path.join(ROOT, "models.json")
+
+
+def load_models() -> dict:
+    try:
+        with open(MODELS_PATH, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    models = payload.get("models")
+    return models if isinstance(models, dict) else {}
+
+
+MODELS = load_models()
+
 
 async def collect_devices() -> list[dict]:
     from pymobiledevice3.lockdown import create_using_usbmux
@@ -102,6 +117,9 @@ async def collect_devices() -> list[dict]:
                 "udid": udid,
                 "name": info.get("DeviceName") or entry.get("device_name") or "iPhone",
                 "product_type": info.get("ProductType") or entry.get("product_type") or "—",
+                "marketing_name": (MODELS.get(info.get("ProductType") or "") or {}).get("name"),
+                "model_year": (MODELS.get(info.get("ProductType") or "") or {}).get("year"),
+                "chip": (MODELS.get(info.get("ProductType") or "") or {}).get("chip"),
                 "ios": info.get("ProductVersion") or entry.get("product_version") or "—",
                 "serial": info.get("SerialNumber") or "—",
                 "imei": info.get("InternationalMobileEquipmentIdentity") or "—",
@@ -271,6 +289,12 @@ class Handler(SimpleHTTPRequestHandler):
                 self._send_json({"ok": True, "probe": asyncio.run(inspect(udid))})
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, 500)
+            return
+
+        if parsed.path == "/api/models":
+            models = [{"product_type": key, **value} for key, value in MODELS.items()]
+            models.sort(key=lambda item: (item.get("year") or 0, item.get("name") or ""), reverse=True)
+            self._send_json({"ok": True, "models": models})
             return
 
         if parsed.path == "/api/hardware":

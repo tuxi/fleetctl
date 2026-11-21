@@ -1688,6 +1688,32 @@ function updateStats() {
   }
 }
 
+async function loadModelOptions() {
+  try {
+    const res = await fetch(`${API_BASE}/api/models`, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok || !data.models.length) return;
+
+    const seen = new Set();
+    const unique = data.models.filter(model => {
+      if (seen.has(model.name)) return false;
+      seen.add(model.name);
+      return true;
+    });
+
+    const select = document.getElementById("f-model");
+    const previous = select.value;
+    select.innerHTML =
+      `<option value="">选择机型</option>` +
+      unique
+        .map(model => `<option value="${model.name}" data-type="${model.product_type}">${model.name}</option>`)
+        .join("");
+    if (previous) select.value = previous;
+  } catch (err) {
+    // Keep the bundled shortlist when the bridge is unavailable.
+  }
+}
+
 async function loadManualDevices() {
   try {
     const res = await fetch(`${API_BASE}/api/store`, { cache: "no-store" });
@@ -1740,8 +1766,11 @@ function deviceCard(entry) {
     id: "r" + entry.udid.replace(/[^a-zA-Z0-9]/g, ""),
     udid: entry.udid,
     real: true,
-    name: entry.name,
+    name: entry.marketing_name || entry.name,
+    deviceName: entry.name,
     model: `${entry.product_type} · ${entry.region}`,
+    modelYear: entry.model_year || null,
+    chip: entry.chip || null,
     ios: entry.ios,
     serial: entry.serial,
     imei: entry.imei,
@@ -1818,7 +1847,10 @@ async function refreshRealDevices() {
       incoming.forEach(entry => {
         const existing = devices.find(d => d.real && d.udid === entry.udid);
         if (existing) {
-          existing.name = entry.name;
+          existing.name = entry.marketing_name || entry.name;
+          existing.deviceName = entry.name;
+          existing.modelYear = entry.model_year || null;
+          existing.chip = entry.chip || null;
           existing.model = `${entry.product_type} · ${entry.region}`;
           existing.ios = entry.ios;
           existing.serial = entry.serial;
@@ -2642,6 +2674,7 @@ updateStats();
 selectDevice(selectedId, false);
 switchView("recycle");
 loadManualDevices().then(loadRealDevices);
+loadModelOptions();
 
 // Pick up devices plugged in or removed while the window stays open.
 setInterval(() => { if (!document.hidden) refreshRealDevices(); }, 4000);
