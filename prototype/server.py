@@ -17,10 +17,11 @@ import asyncio
 import json
 import os
 import re
-import sys
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+
+import store
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", "4174"))
@@ -163,49 +164,6 @@ async def inspect(udid: str) -> dict:
 # Local store: devices registered by hand survive restarts        #
 # ---------------------------------------------------------------- #
 
-def data_dir() -> str:
-    override = os.environ.get("FLEETCTL_DATA_DIR")
-    if override:
-        path = override
-    elif sys.platform == "darwin":
-        path = os.path.expanduser("~/Library/Application Support/fleetctl")
-    else:
-        path = os.path.expanduser("~/.fleetctl")
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
-def store_path() -> str:
-    return os.path.join(data_dir(), "devices.json")
-
-
-def load_store() -> list[dict]:
-    try:
-        with open(store_path(), encoding="utf-8") as handle:
-            payload = json.load(handle)
-    except (OSError, ValueError):
-        return []
-    if isinstance(payload, list):
-        return [row for row in payload if isinstance(row, dict)]
-    rows = payload.get("devices")
-    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
-
-
-def save_store(devices: list[dict]) -> None:
-    path = store_path()
-    tmp = f"{path}.tmp"
-    payload = {
-        "version": 1,
-        "saved_at": datetime.now(timezone.utc).isoformat(),
-        "devices": devices,
-    }
-    with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp, path)
-
-
 def export_dir() -> str:
     downloads = os.path.expanduser("~/Downloads")
     if os.path.isdir(downloads):
@@ -310,9 +268,33 @@ class Handler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/store":
             try:
-                self._send_json({"ok": True, "devices": load_store(), "path": store_path()})
+                self._send_json({"ok": True, "devices": store.list_devices(), "path": store.db_path()})
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, 500)
+            return
+
+        if parsed.path == "/api/reports":
+            try:
+                self._send_json({"ok": True, "reports": store.list_reports()})
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+            return
+
+        if parsed.path.startswith("/api/reports/"):
+            try:
+                report_id = int(parsed.path.rsplit("/", 1)[1])
+            except ValueError:
+                self._send_json({"ok": False, "error": "invalid id"}, 400)
+                return
+            try:
+                archived = store.get_report(report_id)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+                return
+            if archived is None:
+                self._send_json({"ok": False, "error": "not found"}, 404)
+            else:
+                self._send_json({"ok": True, "archived": archived})
             return
 
         super().do_GET()
@@ -344,16 +326,16 @@ class Handler(SimpleHTTPRequestHandler):
 
         rows = [row for row in devices if isinstance(row, dict)]
         try:
-            save_store(rows)
+            saved = store.replace_devices(rows)
         except Exception as exc:
             self._send_json({"ok": False, "error": str(exc)}, 500)
             return
 
-        self._send_json({"ok": True, "count": len(rows), "path": store_path()})
+        self._send_json({"ok": True, "count": saved, "path": store.db_path()})
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib naming
         parsed = urlparse(self.path)
-        if parsed.path != "/api/export":
+        if parsed.path not in ("/api/export", "/api/reports"):
             self._send_json({"ok": False, "error": "not found"}, 404)
             return
 
@@ -369,6 +351,20 @@ class Handler(SimpleHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             self._send_json({"ok": False, "error": "invalid json"}, 400)
+            return
+
+        if parsed.path == "/api/reports":
+            device = payload.get("device") if isinstance(payload, dict) else None
+            report = payload.get("report") if isinstance(payload, dict) else None
+            if not isinstance(device, dict) or not isinstance(report, dict):
+                self._send_json({"ok": False, "error": "device and report required"}, 400)
+                return
+            try:
+                report_id = store.add_report(device, report)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+                return
+            self._send_json({"ok": True, "id": report_id})
             return
 
         content = payload.get("content") if isinstance(payload, dict) else None
@@ -414,6 +410,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
+    store.init()
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"fleetctl prototype: http://localhost:{PORT}")
     print("  GET /api/devices")
