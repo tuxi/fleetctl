@@ -229,6 +229,88 @@ async def hardware(udid: str) -> dict:
     }
 
 
+async def diagnostics() -> dict:
+    """Why are no devices showing up?
+
+    Each check is independent so the operator can see which link is broken:
+    the local service, device enumeration, the USB/driver layer, the data dir.
+    """
+    import platform
+    import subprocess
+    import sys
+
+    checks = []
+
+    def add(name: str, status: str, detail: str) -> None:
+        checks.append({"name": name, "status": status, "detail": detail})
+
+    system = platform.system()
+    add("本地服务", "ok", f"Python {sys.version.split()[0]} · {system}")
+
+    count = 0
+    enumeration_error = None
+    try:
+        from pymobiledevice3.usbmux import list_devices
+
+        devices = await list_devices()
+        count = len({device.serial for device in devices})
+    except Exception as exc:
+        enumeration_error = str(exc)
+
+    if enumeration_error:
+        add("设备枚举", "fail", f"枚举失败：{enumeration_error}")
+    elif count:
+        add("设备枚举", "ok", f"发现 {count} 台设备")
+    else:
+        add("设备枚举", "warn", "系统未枚举到任何 iOS 设备")
+
+    if count:
+        add("USB / 驱动", "ok", "已枚举到设备，跳过驱动层检查")
+    elif system == "Darwin":
+        try:
+            output = subprocess.run(
+                ["system_profiler", "SPUSBDataType"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            ).stdout
+            if "iPhone" in output or "Apple Mobile Device" in output:
+                add("USB 连接", "ok", "系统 USB 列表中可见 iPhone")
+            else:
+                add("USB 连接", "warn", "系统 USB 列表中没有 iPhone")
+        except Exception as exc:
+            add("USB 连接", "warn", f"无法读取 USB 信息：{exc}")
+    elif system == "Windows":
+        try:
+            output = subprocess.run(
+                ["sc", "query", "Apple Mobile Device Service"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            ).stdout
+            if "RUNNING" in output:
+                add("Apple 驱动服务", "ok", "Apple Mobile Device Service 正在运行")
+            elif "STOPPED" in output or "PAUSED" in output:
+                add("Apple 驱动服务", "warn", "Apple Mobile Device Service 未运行")
+            else:
+                add("Apple 驱动服务", "fail", "未找到 Apple Mobile Device Service")
+        except Exception as exc:
+            add("Apple 驱动服务", "fail", f"无法查询服务：{exc}")
+    else:
+        add("USB 连接", "warn", "Linux 需安装 usbmuxd 并配置 udev 规则")
+
+    try:
+        probe = os.path.join(store.data_dir(), ".write-probe")
+        with open(probe, "w", encoding="utf-8") as handle:
+            handle.write("ok")
+        os.remove(probe)
+        add("数据目录", "ok", store.data_dir())
+    except Exception as exc:
+        add("数据目录", "fail", f"无法写入：{exc}")
+
+    return {"platform": system, "device_count": count, "checks": checks}
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
@@ -339,6 +421,13 @@ class Handler(SimpleHTTPRequestHandler):
                 self._send_json(
                     {"ok": True, "archived": entry["payload"], "sha256": entry["sha256"]}
                 )
+            return
+
+        if parsed.path == "/api/diagnostics":
+            try:
+                self._send_json({"ok": True, **asyncio.run(diagnostics())})
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
             return
 
         if parsed.path == "/api/attachments":

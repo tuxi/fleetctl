@@ -449,6 +449,15 @@
     font-size: 12px; line-height: 1; display: grid; place-items: center;
   }
   .attach-empty { font-size: 12px; color: var(--ink-3); padding: 4px 0 8px; }
+
+  .diag-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 9px 0; border-bottom: 1px solid var(--line);
+  }
+  .diag-row:last-child { border-bottom: 0; }
+  .diag-row .name { width: 96px; flex: 0 0 auto; font-size: 12.5px; color: var(--ink); }
+  .diag-row .detail { font-size: 12px; color: var(--ink-2); line-height: 1.6; }
+  #diag-hints ul { margin: 6px 0 0 18px; padding: 0; font-size: 12px; color: var(--ink-2); line-height: 1.8; }
   .report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; }
   .report-grid div { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
   .report-grid .k { color: var(--ink-3); width: 76px; flex: 0 0 auto; }
@@ -766,6 +775,7 @@
     <div class="rail-foot">
       <div class="conn"><span class="dot off"></span><span id="conn-text">未连接设备</span></div>
       <p id="conn-device">插上 USB 后自动刷新</p>
+      <button class="btn" id="diagnose-btn" style="width:100%;margin-top:8px">诊断连接问题</button>
     </div>
   </aside>
 
@@ -1304,6 +1314,23 @@ d•••••@6•••••.com</div>
   </div>
   <div class="modal-body" style="display:block;padding:12px">
     <img id="lightbox-img" alt="" style="max-width:100%;max-height:72vh;display:block;margin:0 auto">
+  </div>
+</div>
+
+<div class="modal" id="diag-modal" role="dialog" aria-modal="true" aria-labelledby="diag-title">
+  <div class="modal-head">
+    <h3 id="diag-title">连接诊断</h3>
+    <span class="hint" id="diag-sub">—</span>
+    <span style="flex:1"></span>
+    <button class="icon-btn" id="diag-close" aria-label="关闭">×</button>
+  </div>
+  <div class="modal-body" style="display:block">
+    <div class="diag-list" id="diag-list"></div>
+    <div id="diag-hints"></div>
+  </div>
+  <div class="modal-foot">
+    <button type="button" class="btn" id="diag-rerun">重新检测</button>
+    <button type="button" class="btn btn-primary" id="diag-cancel">关闭</button>
   </div>
 </div>
 
@@ -3570,6 +3597,78 @@ document.getElementById("attach-file").addEventListener("change", async event =>
 
 document.getElementById("lightbox-close").addEventListener("click", closeLightbox);
 
+const DIAG_HINTS = {
+  Darwin: [
+    "数据线只供电不传数据时系统看不到设备，换一根支持数据传输的线",
+    "手机上出现「信任此电脑」时要点信任",
+    "换一个 USB 口，避免使用无供电的扩展坞",
+    "如果运行在虚拟机中，需要把 iPhone 的 USB 设备直通给虚拟机",
+  ],
+  Windows: [
+    "安装 iTunes 以获得 Apple Mobile Device Support",
+    "在「服务」中确认 Apple Mobile Device Service 正在运行",
+    "安装驱动后重新插拔数据线",
+    "虚拟机需要把 iPhone 的 USB 设备直通给虚拟机",
+  ],
+  default: ["确认数据线支持数据传输", "重新插拔设备后再检测"],
+};
+
+async function runDiagnostics() {
+  const list = document.getElementById("diag-list");
+  list.innerHTML = `<div class="attach-empty">检测中…</div>`;
+  try {
+    const res = await fetch(`${API_BASE}/api/diagnostics`, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "检测失败");
+
+    const style = status =>
+      status === "ok"
+        ? ["clean", "正常"]
+        : status === "warn"
+          ? ["unknown", "注意"]
+          : ["lock", "失败"];
+
+    list.innerHTML = data.checks
+      .map(check => {
+        const [cls, label] = style(check.status);
+        return `<div class="diag-row">
+          <span class="badge ${cls}">${label}</span>
+          <span class="name">${esc(check.name)}</span>
+          <span class="detail">${esc(check.detail)}</span>
+        </div>`;
+      })
+      .join("");
+
+    document.getElementById("diag-sub").textContent =
+      `${data.platform} · 发现 ${data.device_count} 台设备`;
+
+    const hints = DIAG_HINTS[data.platform] || DIAG_HINTS.default;
+    document.getElementById("diag-hints").innerHTML =
+      `<div class="section-title" style="margin-top:14px">常见原因</div>
+       <ul>${hints.map(hint => `<li>${esc(hint)}</li>`).join("")}</ul>`;
+  } catch (err) {
+    list.innerHTML = `<div class="attach-empty">无法连接本地服务：${esc(err.message || err)}</div>`;
+    document.getElementById("diag-hints").innerHTML = "";
+    document.getElementById("diag-sub").textContent = "—";
+  }
+}
+
+function openDiagnostics() {
+  document.getElementById("scrim").classList.add("show");
+  document.getElementById("diag-modal").classList.add("show");
+  runDiagnostics();
+}
+
+function closeDiagnostics() {
+  document.getElementById("scrim").classList.remove("show");
+  document.getElementById("diag-modal").classList.remove("show");
+}
+
+document.getElementById("diagnose-btn").addEventListener("click", openDiagnostics);
+document.getElementById("diag-rerun").addEventListener("click", runDiagnostics);
+document.getElementById("diag-close").addEventListener("click", closeDiagnostics);
+document.getElementById("diag-cancel").addEventListener("click", closeDiagnostics);
+
 const gradeButtons = document.querySelectorAll("#f-grade button");
 gradeButtons.forEach(btn => {
   btn.addEventListener("click", () => {
@@ -3660,6 +3759,7 @@ document.getElementById("scrim").addEventListener("click", () => {
   closeHistory();
   closeReceiptDialog();
   closeLightbox();
+  closeDiagnostics();
 });
 
 const titles = {
@@ -3803,6 +3903,7 @@ document.addEventListener("keydown", e => {
     if (document.getElementById("history-modal").classList.contains("show")) closeHistory();
     if (document.getElementById("receipt-modal").classList.contains("show")) closeReceiptDialog();
     if (document.getElementById("lightbox").classList.contains("show")) closeLightbox();
+    if (document.getElementById("diag-modal").classList.contains("show")) closeDiagnostics();
   }
 });
 
