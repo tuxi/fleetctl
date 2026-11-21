@@ -438,6 +438,18 @@
   .history-row .name { font-weight: 500; font-size: 12.5px; }
   .history-row .sub { font-size: 11px; color: var(--ink-3); font-family: var(--mono); }
   .history-row .when { margin-left: auto; font-size: 11px; color: var(--ink-3); font-family: var(--mono); }
+
+  .price-control {
+    font: inherit; font-size: 12.5px; color: var(--ink);
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px;
+  }
+  .price-input {
+    width: 88px; font: inherit; font-size: 12px; color: var(--ink);
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 4px 7px; text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
   .sheet-foot { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--line);
     display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
 
@@ -705,6 +717,7 @@
     <div class="nav-label">工作台</div>
     <button class="nav-item" data-view="recycle" aria-current="page">回收<span class="nav-count" id="nav-recycle-count">4</span></button>
     <button class="nav-item" data-view="devices">设备<span class="nav-count" id="nav-devices-count">8</span></button>
+    <button class="nav-item" data-view="prices">价格</button>
     <button class="nav-item" data-view="report">报告<span class="nav-count">28</span></button>
     <button class="nav-item" data-view="batch">批量</button>
 
@@ -839,6 +852,29 @@
         </div>
         <div class="report-wrap">
           <article class="sheet" id="report-sheet"></article>
+        </div>
+      </section>
+
+      <!-- prices -->
+      <section class="view" id="view-prices">
+        <div class="batch-bar">
+          <select id="price-model" class="price-control"><option value="">选择机型</option></select>
+          <select id="price-capacity" class="price-control">
+            <option>64GB</option><option selected>128GB</option><option>256GB</option>
+            <option>512GB</option><option>1TB</option>
+          </select>
+          <button class="btn" id="price-add">添加机型</button>
+          <span style="flex:1"></span>
+          <span class="muted" id="price-hint">回收价按机型、容量、成色分档</span>
+          <button class="btn btn-primary" id="price-save">保存全部</button>
+        </div>
+        <div class="table-wrap">
+          <table class="batch-table">
+            <thead>
+              <tr><th>机型</th><th>容量</th><th>A 准新</th><th>B 轻微</th><th>C 明显</th><th></th></tr>
+            </thead>
+            <tbody id="price-rows"></tbody>
+          </table>
         </div>
       </section>
 
@@ -1160,6 +1196,8 @@ const demoDevices = [
 // The board starts empty and fills with real hardware. `?demo=1` loads the
 // bundled sample set for design review.
 const devices = [];
+let modelCatalog = [];
+let priceRows = [];
 demoDevices.forEach(d => { d.demo = true; });
 if (new URLSearchParams(location.search).has("demo")) devices.push(...demoDevices);
 
@@ -1723,6 +1761,7 @@ async function loadModelOptions() {
     const data = await res.json();
     if (!data.ok || !data.models.length) return;
 
+    modelCatalog = data.models;
     const seen = new Set();
     const unique = data.models.filter(model => {
       if (seen.has(model.name)) return false;
@@ -1738,10 +1777,127 @@ async function loadModelOptions() {
         .map(model => `<option value="${model.name}" data-type="${model.product_type}">${model.name}</option>`)
         .join("");
     if (previous) select.value = previous;
+
+    const priceModel = document.getElementById("price-model");
+    if (priceModel) {
+      const kept = priceModel.value;
+      priceModel.innerHTML =
+        `<option value="">选择机型</option>` +
+        unique
+          .map(model => `<option value="${model.product_type}">${model.name}</option>`)
+          .join("");
+      if (kept) priceModel.value = kept;
+    }
   } catch (err) {
     // Keep the bundled shortlist when the bridge is unavailable.
   }
 }
+
+function modelName(productType) {
+  const hit = modelCatalog.find(model => model.product_type === productType);
+  return hit ? hit.name : productType;
+}
+
+function priceFor(productType, capacity, grade) {
+  const row = priceRows.find(
+    item => item.product_type === productType && item.capacity === capacity
+  );
+  if (!row) return null;
+  if (grade === "A") return row.grade_a;
+  if (grade === "B") return row.grade_b;
+  return row.grade_c;
+}
+
+async function loadPrices() {
+  try {
+    const res = await fetch(`${API_BASE}/api/prices`, { cache: "no-store" });
+    const data = await res.json();
+    if (data.ok) {
+      priceRows = data.prices || [];
+      renderPrices();
+    }
+  } catch (err) {
+    // Keep whatever is in memory.
+  }
+}
+
+function renderPrices() {
+  const tbody = document.getElementById("price-rows");
+  if (!priceRows.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="6">
+      <div class="empty"><div class="t">还没有价格</div>
+      <div class="hint">从上方选择机型和容量，添加一条再填价格。</div></div></td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = priceRows
+    .map(
+      (row, index) => `<tr data-index="${index}">
+        <td>${esc(modelName(row.product_type))}<div class="batch-sub">${esc(row.product_type)}</div></td>
+        <td class="mono">${esc(row.capacity)}</td>
+        <td><input class="price-input" type="number" data-field="grade_a" value="${row.grade_a ?? ""}"></td>
+        <td><input class="price-input" type="number" data-field="grade_b" value="${row.grade_b ?? ""}"></td>
+        <td><input class="price-input" type="number" data-field="grade_c" value="${row.grade_c ?? ""}"></td>
+        <td><button class="btn" data-remove="${index}">删除</button></td>
+      </tr>`
+    )
+    .join("");
+
+  tbody.querySelectorAll("input[data-field]").forEach(input => {
+    input.addEventListener("change", () => {
+      const index = Number(input.closest("tr").dataset.index);
+      priceRows[index][input.dataset.field] =
+        input.value === "" ? null : Number(input.value);
+    });
+  });
+
+  tbody.querySelectorAll("button[data-remove]").forEach(button => {
+    button.addEventListener("click", () => {
+      priceRows.splice(Number(button.dataset.remove), 1);
+      renderPrices();
+    });
+  });
+}
+
+async function savePrices() {
+  try {
+    const res = await fetch(`${API_BASE}/api/prices`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prices: priceRows }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "保存失败");
+    toast(`已保存 ${data.count} 条价格`);
+    await loadPrices();
+  } catch (err) {
+    toast(`保存失败：${err.message || err}`);
+  }
+}
+
+function applyPriceSuggestion() {
+  const select = document.getElementById("f-model");
+  const productType = select.selectedOptions[0]?.dataset.type || "";
+  const capacity = document.getElementById("f-storage").value;
+  const grade =
+    document.querySelector('#f-grade button[aria-pressed="true"]')?.dataset.grade || "A";
+  const price = priceFor(productType, capacity, grade);
+  if (price != null) document.getElementById("f-price").value = price;
+}
+
+document.getElementById("price-add").addEventListener("click", () => {
+  const productType = document.getElementById("price-model").value;
+  const capacity = document.getElementById("price-capacity").value;
+  if (!productType) { toast("先选择机型"); return; }
+  if (priceRows.some(row => row.product_type === productType && row.capacity === capacity)) {
+    toast("这条已经存在");
+    return;
+  }
+  priceRows.push({ product_type: productType, capacity, grade_a: null, grade_b: null, grade_c: null });
+  renderPrices();
+});
+
+document.getElementById("price-save").addEventListener("click", savePrices);
 
 async function loadManualDevices() {
   try {
@@ -2089,7 +2245,10 @@ function updateMargin() {
 
 function openPrice(d) {
   pricingDevice = d;
-  const buy = Number(String(d.price).replace(/[^\d]/g, "")) || 0;
+  const suggested = d.productType && d.capacity && d.grade
+    ? priceFor(d.productType, d.capacity, d.grade)
+    : null;
+  const buy = suggested ?? (Number(String(d.price).replace(/[^\d]/g, "")) || 0);
   const sale = buy ? Math.round((buy * 1.18) / 10) * 10 : 0;
 
   document.getElementById("price-sub").textContent = `${d.name} · ${d.serial}`;
@@ -2613,13 +2772,12 @@ const gradeButtons = document.querySelectorAll("#f-grade button");
 gradeButtons.forEach(btn => {
   btn.addEventListener("click", () => {
     gradeButtons.forEach(x => x.setAttribute("aria-pressed", String(x === btn)));
+    applyPriceSuggestion();
   });
 });
 
-document.getElementById("f-model").addEventListener("change", e => {
-  const ref = e.target.selectedOptions[0]?.dataset.ref;
-  if (ref) document.getElementById("f-price").value = ref;
-});
+document.getElementById("f-model").addEventListener("change", applyPriceSuggestion);
+document.getElementById("f-storage").addEventListener("change", applyPriceSuggestion);
 
 document.getElementById("intake-form").addEventListener("submit", e => {
   e.preventDefault();
@@ -2646,6 +2804,9 @@ document.getElementById("intake-form").addEventListener("submit", e => {
     time: "刚刚",
     status: "unknown",
     stage: "await",
+    productType: type,
+    capacity: storage,
+    grade,
     price: "¥" + priceNum.toLocaleString("en-US"),
     seller: seller || "—",
     verdict: "未验证",
@@ -2678,6 +2839,7 @@ const titles = {
   devices: ["设备", "8 台在库 · 3 台异常"],
   recycle: ["回收", "本周收机 8 台 · 4 台待处理"],
   batch: ["批量", "勾选设备，顺序检测并自动分流"],
+  prices: ["价格", "回收价按机型、容量、成色分档"],
   inspect: ["验机", "iPhone 15 · 第 3 步 / 共 5 步"],
   report: ["报告", "已生成 28 份 · 最近 11-21 13:42"]
 };
@@ -2702,6 +2864,7 @@ function switchView(name) {
   if (name === "recycle") renderBoard();
   if (name === "batch") renderBatch();
   if (name === "report") renderReport(current);
+  if (name === "prices") renderPrices();
 }
 
 document.querySelectorAll(".nav-item").forEach(btn => {
@@ -2781,6 +2944,7 @@ selectDevice(selectedId, false);
 switchView("recycle");
 loadManualDevices().then(loadRealDevices);
 loadModelOptions();
+loadPrices();
 
 // Pick up devices plugged in or removed while the window stays open.
 setInterval(() => { if (!document.hidden) refreshRealDevices(); }, 4000);

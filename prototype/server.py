@@ -266,6 +266,13 @@ class Handler(SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": str(exc)}, 500)
             return
 
+        if parsed.path == "/api/prices":
+            try:
+                self._send_json({"ok": True, "prices": store.list_prices()})
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+            return
+
         if parsed.path == "/api/store":
             try:
                 self._send_json({"ok": True, "devices": store.list_devices(), "path": store.db_path()})
@@ -301,7 +308,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_PUT(self) -> None:  # noqa: N802 - stdlib naming
         parsed = urlparse(self.path)
-        if parsed.path != "/api/store":
+        if parsed.path not in ("/api/store", "/api/prices"):
             self._send_json({"ok": False, "error": "not found"}, 404)
             return
 
@@ -317,6 +324,20 @@ class Handler(SimpleHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             self._send_json({"ok": False, "error": "invalid json"}, 400)
+            return
+
+        if parsed.path == "/api/prices":
+            prices = payload.get("prices") if isinstance(payload, dict) else None
+            if not isinstance(prices, list):
+                self._send_json({"ok": False, "error": "prices must be a list"}, 400)
+                return
+            rows = [row for row in prices if isinstance(row, dict)]
+            try:
+                saved = store.replace_prices(rows)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+                return
+            self._send_json({"ok": True, "count": saved})
             return
 
         devices = payload.get("devices") if isinstance(payload, dict) else None

@@ -38,6 +38,16 @@ CREATE TABLE IF NOT EXISTS reports (
     data TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_reports_serial ON reports(serial);
+
+CREATE TABLE IF NOT EXISTS prices (
+    product_type TEXT NOT NULL,
+    capacity TEXT NOT NULL,
+    grade_a INTEGER,
+    grade_b INTEGER,
+    grade_c INTEGER,
+    updated_at TEXT,
+    PRIMARY KEY (product_type, capacity)
+);
 """
 
 
@@ -196,3 +206,37 @@ def get_report(report_id: int) -> Optional[dict]:
         return json.loads(row["data"])
     except ValueError:
         return None
+
+
+def list_prices() -> list[dict]:
+    with session() as conn:
+        rows = conn.execute(
+            "SELECT product_type, capacity, grade_a, grade_b, grade_c, updated_at "
+            "FROM prices ORDER BY product_type, capacity"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def replace_prices(rows: list[dict]) -> int:
+    now = _now()
+    values = [
+        (
+            str(item.get("product_type") or ""),
+            str(item.get("capacity") or ""),
+            item.get("grade_a"),
+            item.get("grade_b"),
+            item.get("grade_c"),
+            now,
+        )
+        for item in rows
+        if item.get("product_type") and item.get("capacity")
+    ]
+    with session() as conn:
+        conn.execute("DELETE FROM prices")
+        conn.executemany(
+            "INSERT OR REPLACE INTO prices "
+            "(product_type, capacity, grade_a, grade_b, grade_c, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            values,
+        )
+    return len(values)
