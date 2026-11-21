@@ -1989,11 +1989,11 @@ function renderStats() {
     `售出 ${totalSold} 台 · 毛利 ¥${totalMargin.toLocaleString("en-US")}`;
 }
 
-async function loadModelOptions() {
+async function loadModelOptions(attempt = 0) {
   try {
     const res = await fetch(`${API_BASE}/api/models`, { cache: "no-store" });
     const data = await res.json();
-    if (!data.ok || !data.models.length) return;
+    if (!data.ok || !data.models.length) throw new Error("empty catalogue");
 
     modelCatalog = data.models;
     const seen = new Set();
@@ -2023,7 +2023,12 @@ async function loadModelOptions() {
       if (kept) priceModel.value = kept;
     }
   } catch (err) {
-    // Keep the bundled shortlist when the bridge is unavailable.
+    // The sidecar takes a while to start; keep retrying instead of leaving the
+    // bundled shortlist in place.
+    if (attempt < 60) {
+      await sleep(500);
+      return loadModelOptions(attempt + 1);
+    }
   }
 }
 
@@ -2042,16 +2047,18 @@ function priceFor(productType, capacity, grade) {
   return row.grade_c;
 }
 
-async function loadPrices() {
+async function loadPrices(attempt = 0) {
   try {
     const res = await fetch(`${API_BASE}/api/prices`, { cache: "no-store" });
     const data = await res.json();
-    if (data.ok) {
-      priceRows = data.prices || [];
-      renderPrices();
-    }
+    if (!data.ok) throw new Error("failed");
+    priceRows = data.prices || [];
+    renderPrices();
   } catch (err) {
-    // Keep whatever is in memory.
+    if (attempt < 60) {
+      await sleep(500);
+      return loadPrices(attempt + 1);
+    }
   }
 }
 
