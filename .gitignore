@@ -54,6 +54,7 @@ build/
 *.AppImage
 *.wxs
 *.wixobj
+*.spec
 
 # Signing material — never commit certificates or private keys
 *.p12
@@ -71,3 +72,8 @@ mac_report.*
 mac_precheck.*
 pc_out.txt
 CHANGELOG.md
+
+# Tauri
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/gen/schemas/

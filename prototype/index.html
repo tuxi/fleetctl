@@ -1,0 +1,2161 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fleetctl · 设备验机工作台</title>
+<style>
+  :root {
+    --paper: #F1F4F3;
+    --rail: #E7EDEA;
+    --surface: #FFFFFF;
+    --surface-2: #F7F9F8;
+    --ink: #151A19;
+    --ink-2: #49534F;
+    --ink-3: #77827E;
+    --line: #DCE3E0;
+    --line-strong: #C3CEC9;
+    --accent: #2E6F6A;
+    --accent-soft: #E3EFEC;
+    --clean: #2C7A4B;
+    --clean-soft: #E4F1E9;
+    --lock: #A93B2F;
+    --lock-soft: #F6E5E2;
+    --mdm: #64489F;
+    --mdm-soft: #ECE7F6;
+    --unknown: #6F7A76;
+    --unknown-soft: #EDF0EF;
+    --radius: 8px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+            "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+
+  [data-theme="dark"] {
+    --paper: #101413;
+    --rail: #151B19;
+    --surface: #1A211F;
+    --surface-2: #202826;
+    --ink: #E8EDEA;
+    --ink-2: #AAB4B0;
+    --ink-3: #7B8682;
+    --line: #29322F;
+    --line-strong: #3A4541;
+    --accent: #63A9A1;
+    --accent-soft: #1E302D;
+    --clean: #5FB884;
+    --clean-soft: #172A20;
+    --lock: #E08377;
+    --lock-soft: #2E1B18;
+    --mdm: #A88FE0;
+    --mdm-soft: #241E33;
+    --unknown: #8B9691;
+    --unknown-soft: #232A28;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--ink);
+    background: var(--paper);
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+  .app {
+    display: grid;
+    grid-template-columns: 228px minmax(0, 1fr) 396px;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ---------------- rail ---------------- */
+  .rail {
+    background: var(--rail);
+    border-right: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    padding: 18px 12px 14px;
+    gap: 2px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0 8px 18px;
+  }
+  .brand-mark {
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    background: var(--accent);
+    position: relative;
+  }
+  .brand-mark::after {
+    content: "";
+    position: absolute; inset: 6px 7px;
+    border: 1.5px solid var(--rail);
+    border-radius: 1.5px;
+  }
+  .brand-name { font-weight: 600; letter-spacing: -0.01em; font-size: 14px; }
+  .brand-ver { font-size: 11px; color: var(--ink-3); margin-left: auto; font-family: var(--mono); }
+
+  .nav-label {
+    font-size: 11px; color: var(--ink-3); padding: 12px 10px 6px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px;
+    width: 100%; text-align: left;
+    padding: 7px 10px;
+    border-radius: 6px;
+    color: var(--ink-2);
+    position: relative;
+  }
+  .nav-item:hover { background: rgba(0,0,0,.035); }
+  [data-theme="dark"] .nav-item:hover { background: rgba(255,255,255,.04); }
+  .nav-item[aria-current="page"] {
+    background: var(--surface);
+    color: var(--ink);
+    font-weight: 500;
+    box-shadow: 0 1px 0 rgba(0,0,0,.02);
+  }
+  .nav-item[aria-current="page"]::before {
+    content: ""; position: absolute; left: -12px; top: 8px; bottom: 8px;
+    width: 2px; background: var(--accent); border-radius: 0 2px 2px 0;
+  }
+  .nav-count {
+    margin-left: auto; font-size: 11px; font-family: var(--mono);
+    color: var(--ink-3);
+  }
+  .rail-foot { margin-top: auto; padding: 10px 8px 0; border-top: 1px solid var(--line); }
+  .conn { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--clean); box-shadow: 0 0 0 3px var(--clean-soft); }
+  .dot.off { background: var(--unknown); box-shadow: 0 0 0 3px var(--unknown-soft); }
+  .rail-foot p { margin: 6px 0 0; font-size: 11px; color: var(--ink-3); font-family: var(--mono); }
+
+  .mode-chip {
+    font-size: 11px;
+    color: var(--ink-3);
+    border: 1px solid var(--line);
+    border-radius: 100px;
+    padding: 1px 8px;
+    white-space: nowrap;
+  }
+  .mode-chip.live { color: var(--clean); border-color: var(--clean); }
+
+  /* ---------------- main ---------------- */
+  .main { display: flex; flex-direction: column; min-width: 0; background: var(--surface); }
+  .bar {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--line);
+    min-height: 58px;
+  }
+  .bar h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .bar .sub { color: var(--ink-3); font-size: 12px; }
+  .bar-spacer { flex: 1; }
+  .search {
+    display: flex; align-items: center; gap: 7px;
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    border-radius: 6px;
+    padding: 5px 9px;
+    width: 230px;
+  }
+  .search input {
+    border: 0; background: none; font: inherit; color: var(--ink);
+    width: 100%; outline: none;
+  }
+  .search input::placeholder { color: var(--ink-3); }
+  .search kbd {
+    font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+    border: 1px solid var(--line); border-radius: 4px; padding: 0 4px;
+  }
+  .icon-btn {
+    width: 28px; height: 28px; border-radius: 6px;
+    display: inline-grid; place-items: center;
+    color: var(--ink-2);
+  }
+  .icon-btn:hover { background: var(--surface-2); }
+  .insp-close { display: none; font-size: 18px; line-height: 1; }
+  .btn {
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    padding: 6px 12px;
+    background: var(--surface);
+    color: var(--ink);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--ink-3); }
+  .btn-primary {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+  }
+  .btn-primary:hover { filter: brightness(1.06); }
+  [data-theme="dark"] .btn-primary { color: #0C1311; }
+
+  .table-foot {
+    display: flex; gap: 16px;
+    padding: 10px 22px;
+    font-size: 12px; color: var(--ink-3);
+    border-top: 1px solid var(--line);
+  }
+
+  .views { flex: 1; overflow: auto; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ---------------- stats ---------------- */
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    border-bottom: 1px solid var(--line);
+  }
+  .stat { padding: 16px 22px; border-right: 1px solid var(--line); }
+  .stat:last-child { border-right: 0; }
+  .stat .v { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+  .stat .v small { font-size: 13px; color: var(--ink-3); font-weight: 500; margin-left: 3px; }
+
+  /* ---------------- table ---------------- */
+  .table-wrap { padding: 0; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--surface);
+    text-align: left;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--ink-3);
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  thead th:first-child, tbody td:first-child { padding-left: 22px; }
+  thead th:last-child, tbody td:last-child { padding-right: 22px; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--surface-2); }
+  tbody tr.selected { background: var(--accent-soft); }
+  tbody tr.selected td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+  tbody td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  .dev-name { font-weight: 500; white-space: nowrap; }
+  .dev-model { display: none; font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+  .mono { font-family: var(--mono); font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .muted { color: var(--ink-3); }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 500;
+    padding: 2px 8px 2px 7px;
+    border-radius: 100px;
+    white-space: nowrap;
+  }
+  .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .badge.clean { color: var(--clean); background: var(--clean-soft); }
+  .badge.lock { color: var(--lock); background: var(--lock-soft); }
+  .badge.mdm { color: var(--mdm); background: var(--mdm-soft); }
+  .badge.unknown { color: var(--unknown); background: var(--unknown-soft); }
+
+  /* ---------------- inspector ---------------- */
+  .inspector {
+    background: var(--surface-2);
+    border-left: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    min-width: 0;
+  }
+  .insp-head {
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .insp-head .row { display: flex; align-items: flex-start; gap: 10px; }
+  .insp-head h2 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+  .insp-head .model { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+  .insp-body { padding: 18px 20px; overflow: auto; flex: 1; }
+
+  .verdict { margin-bottom: 20px; }
+  .verdict .k { font-size: 11px; color: var(--ink-3); margin-bottom: 4px; }
+  .verdict .v {
+    font-size: 24px; font-weight: 600; letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+  .verdict .v.clean { color: var(--clean); }
+  .verdict .v.lock { color: var(--lock); }
+  .verdict .v.mdm { color: var(--mdm); }
+  .verdict .v.unknown { color: var(--unknown); }
+  .verdict .hint { font-size: 12px; color: var(--ink-2); margin-top: 6px; max-width: 34ch; }
+
+  .section-title {
+    font-size: 11px; color: var(--ink-3);
+    padding-bottom: 6px; margin: 18px 0 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .kv { display: grid; grid-template-columns: 92px 1fr; gap: 4px 10px; }
+  .kv dt { color: var(--ink-3); font-size: 12px; }
+  .kv dd { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--ink); word-break: break-all; }
+  .kv dd.plain { font-family: var(--sans); }
+
+  .quote {
+    margin-top: 10px;
+    border-left: 2px solid var(--line-strong);
+    padding: 8px 0 8px 12px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-2);
+    white-space: pre-wrap;
+    line-height: 1.6;
+  }
+  .quote strong { color: var(--ink); font-weight: 600; }
+
+  .advice { margin: 0; padding-left: 16px; color: var(--ink-2); font-size: 12px; line-height: 1.75; }
+  .advice li::marker { color: var(--line-strong); }
+
+  .insp-foot {
+    padding: 12px 20px 16px;
+    border-top: 1px solid var(--line);
+    display: flex; gap: 8px;
+  }
+  .insp-foot .btn { flex: 1; text-align: center; }
+
+  /* ---------------- wizard ---------------- */
+  .wizard { padding: 26px 32px 40px; max-width: 980px; }
+  .stepper { display: flex; align-items: center; gap: 0; margin-bottom: 30px; }
+  .step { display: flex; align-items: center; gap: 9px; color: var(--ink-3); }
+  .step .n {
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 1px solid var(--line-strong);
+    display: grid; place-items: center;
+    font-size: 11px; font-family: var(--mono);
+    background: var(--surface);
+  }
+  .step.done { color: var(--ink-2); }
+  .step.done .n { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .step.current { color: var(--ink); font-weight: 500; }
+  .step.current .n { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .step-line { flex: 1; height: 1px; background: var(--line); margin: 0 12px; min-width: 18px; }
+
+  .panel {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .panel-head {
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .panel-head h3 { margin: 0; font-size: 14px; font-weight: 600; }
+  .panel-head .sub { color: var(--ink-3); font-size: 12px; }
+  .panel-body { padding: 18px; }
+
+  .verdict-row { display: grid; grid-template-columns: 1fr 260px; gap: 22px; align-items: start; }
+  .verdict-hero .big { font-size: 30px; font-weight: 600; letter-spacing: -0.025em; color: var(--lock); }
+  .verdict-hero .big.clean { color: var(--clean); }
+  .verdict-hero .big.mdm { color: var(--mdm); }
+  .verdict-hero .big.unknown { color: var(--ink-3); }
+  .verdict-hero p { color: var(--ink-2); margin: 6px 0 0; max-width: 46ch; }
+  .evidence-card {
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px; background: var(--surface-2);
+  }
+  .evidence-card .k { font-size: 11px; color: var(--ink-3); }
+  .evidence-card .acct { font-family: var(--mono); font-size: 14px; margin-top: 4px; }
+
+  .actions { display: flex; gap: 8px; margin-top: 22px; }
+  .note {
+    margin-top: 18px; padding: 12px 14px;
+    background: var(--lock-soft); border-radius: 8px;
+    color: var(--ink-2); font-size: 12px;
+  }
+  .note strong { color: var(--lock); }
+  .note.clean { background: var(--clean-soft); }
+  .note.clean strong { color: var(--clean); }
+  .note.mdm { background: var(--mdm-soft); }
+  .note.mdm strong { color: var(--mdm); }
+  .note.unknown { background: var(--unknown-soft); }
+  .note.unknown strong { color: var(--unknown); }
+
+  /* ---------------- report ---------------- */
+  .report-wrap { padding: 28px; display: flex; justify-content: center; }
+  .sheet {
+    width: 100%; max-width: 720px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 40px 44px;
+  }
+  .sheet-head { display: flex; align-items: flex-start; gap: 14px; padding-bottom: 18px; border-bottom: 2px solid var(--ink); }
+  .sheet-head h2 { margin: 0; font-size: 20px; letter-spacing: -0.02em; }
+  .sheet-head .meta { margin-left: auto; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+  .sheet h4 { font-size: 12px; margin: 26px 0 8px; color: var(--ink-3); font-weight: 500; }
+  .sheet table { border-top: 1px solid var(--line); }
+  .sheet td, .sheet th { padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 12px; text-align: left; }
+  .sheet th { color: var(--ink-3); font-weight: 500; width: 132px; }
+  .sheet .conclusion {
+    margin-top: 8px; padding: 16px 18px;
+    border: 1px solid var(--lock); border-radius: 6px;
+    background: var(--lock-soft);
+  }
+  .sheet .conclusion .t { font-size: 18px; font-weight: 600; color: var(--lock); }
+  .sheet .conclusion p { margin: 4px 0 0; color: var(--ink-2); font-size: 12px; }
+  .sheet-foot { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--line);
+    display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+
+  .app.inspecting .inspector { display: flex; }
+  .app.no-inspector { grid-template-columns: 228px minmax(0, 1fr); }
+  .app.no-inspector .inspector { display: none; }
+
+  .app.overlay-inspector { grid-template-columns: 228px minmax(0, 1fr); }
+  .app.overlay-inspector .inspector {
+    display: flex; position: fixed; right: 0; top: 0; bottom: 0; width: 396px;
+    box-shadow: -12px 0 32px rgba(0,0,0,.12); z-index: 30;
+  }
+  .app.overlay-inspector .inspector .insp-close { display: inline-grid; }
+
+  /* ---------------- recycle board ---------------- */
+  .board {
+    display: flex; align-items: stretch;
+    overflow-x: auto;
+    min-height: calc(100vh - 58px - 92px);
+    padding-bottom: 24px;
+  }
+  .col {
+    flex: 0 0 200px; min-width: 200px;
+    padding: 14px 12px 0;
+    border-right: 1px solid var(--line);
+  }
+  .col:last-child { border-right: 0; }
+  .col-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 2px 10px; margin-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .col-name { font-size: 12px; font-weight: 600; }
+  .col-count { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+  .cards { display: flex; flex-direction: column; gap: 8px; }
+  .col-empty { padding: 16px 2px; font-size: 12px; color: var(--ink-3); }
+
+  .card {
+    width: 100%; text-align: left;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 11px 12px 11px 14px;
+    position: relative;
+  }
+  .card::before {
+    content: ""; position: absolute; left: 0; top: 10px; bottom: 10px;
+    width: 2px; border-radius: 2px; background: var(--line-strong);
+  }
+  .card.clean::before { background: var(--clean); }
+  .card.lock::before { background: var(--lock); }
+  .card.mdm::before { background: var(--mdm); }
+  .card.unknown::before { background: var(--unknown); }
+  .card:hover { border-color: var(--line-strong); }
+  .card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+  .card .top { display: flex; align-items: baseline; gap: 8px; }
+  .card .name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .price { margin-left: auto; font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .card .serial { display: block; font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-top: 3px; }
+  .card .foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .card .seller { margin-left: auto; font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .demo-tag {
+    font-size: 10px; color: var(--ink-3);
+    border: 1px solid var(--line); border-radius: 3px;
+    padding: 0 4px; line-height: 1.5;
+  }
+
+  /* ---------------- intake modal ---------------- */
+  .scrim {
+    position: fixed; inset: 0;
+    background: rgba(8, 12, 11, .34);
+    display: none; z-index: 50;
+  }
+  .scrim.show { display: block; }
+  .modal {
+    position: fixed; z-index: 51;
+    left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(560px, calc(100vw - 32px));
+    max-height: calc(100vh - 40px);
+    overflow: auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, .22);
+    display: none;
+  }
+  .modal.show { display: block; }
+  .modal-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 15px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .modal-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+  .modal-head .hint { font-size: 12px; color: var(--ink-3); }
+  .modal-body {
+    padding: 16px 18px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  }
+  .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .field.wide { grid-column: 1 / -1; }
+  .field label { font-size: 11px; color: var(--ink-3); }
+  .field input, .field select {
+    font: inherit; font-size: 13px; color: var(--ink);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 7px 9px;
+    min-width: 0;
+  }
+  .field input::placeholder { color: var(--ink-3); }
+  .field input:focus, .field select:focus {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    flex: 1; padding: 6px 0; font-size: 12px;
+    background: var(--surface-2); color: var(--ink-2);
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] {
+    background: var(--accent-soft); color: var(--accent); font-weight: 600;
+  }
+  .modal-foot {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 13px 18px;
+    border-top: 1px solid var(--line);
+  }
+
+  /* ---------------- batch ---------------- */
+  .batch-bar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 22px;
+    border-bottom: 1px solid var(--line);
+  }
+  .check { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); }
+  .check input, .batch-table input[type="checkbox"] { accent-color: var(--accent); }
+  .progress { height: 3px; background: var(--line); }
+  .progress-fill { height: 100%; width: 0; background: var(--accent); transition: width .2s ease; }
+  .batch-table td { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .batch-table th { position: static; }
+  .batch-sub { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
+  .batch-table tr.running { background: var(--accent-soft); }
+  .batch-table td.center { text-align: center; }
+
+  .margin-box {
+    display: flex; gap: 28px;
+    padding: 10px 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  .margin-box .k { font-size: 11px; color: var(--ink-3); }
+  .margin-box .v { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* ---------------- states & motion ---------------- */
+  tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .empty { padding: 64px 22px; text-align: center; color: var(--ink-3); }
+  .empty .t { font-size: 14px; color: var(--ink-2); margin-bottom: 4px; }
+  .empty .hint { font-size: 12px; }
+  .empty-row td { padding: 0 !important; }
+
+  .dot-live {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); margin-right: 7px; vertical-align: 2px;
+    animation: pulse 1s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: .2; } 50% { opacity: 1; } }
+
+  .btn:disabled { opacity: .45; cursor: default; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 24px;
+    transform: translate(-50%, 10px);
+    background: var(--ink); color: var(--surface);
+    border-radius: 8px; padding: 9px 15px;
+    font-size: 12.5px; opacity: 0; pointer-events: none;
+    transition: opacity .16s ease, transform .16s ease;
+    z-index: 40; max-width: 80vw;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dot-live { animation: none; }
+    .toast { transition: none; }
+  }
+
+  @media print {
+    .rail, .bar, .inspector, .toast { display: none !important; }
+    .app { display: block; height: auto; }
+    .view { display: none !important; }
+    #view-report { display: block !important; }
+    .report-wrap { padding: 0; }
+    .sheet { border: 0; max-width: none; padding: 0; }
+    body { background: #fff; }
+  }
+
+  /* ---------------- responsive ---------------- */
+  @media (max-width: 1180px) {
+    .app { grid-template-columns: 200px minmax(0,1fr); }
+    .app.no-inspector, .app.overlay-inspector { grid-template-columns: 200px minmax(0,1fr); }
+    .col { flex-basis: 190px; min-width: 190px; }
+    .inspector { display: none; }
+    .app.inspecting .inspector {
+      display: flex; position: fixed; right: 0; top: 0; bottom: 0; width: 380px;
+      box-shadow: -12px 0 32px rgba(0,0,0,.12); z-index: 20;
+    }
+    .app.inspecting .inspector .insp-close { display: inline-grid; }
+  }
+  @media (max-width: 780px) {
+    .app, .app.no-inspector, .app.overlay-inspector { grid-template-columns: 1fr; }
+    .rail { display: none; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .stat:nth-child(2) { border-right: 0; }
+    .verdict-row { grid-template-columns: 1fr; }
+    .search { display: none; }
+    .dev-model { display: block; }
+    thead th:nth-child(n+3), tbody td:nth-child(n+3) { display: none; }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .inspector, .view.active { animation: none; }
+    tbody tr { transition: background .12s ease; }
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- rail -->
+  <aside class="rail">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">fleetctl</span>
+      <span class="brand-ver">0.5</span>
+    </div>
+
+    <div class="nav-label">工作台</div>
+    <button class="nav-item" data-view="recycle" aria-current="page">回收<span class="nav-count" id="nav-recycle-count">4</span></button>
+    <button class="nav-item" data-view="devices">设备<span class="nav-count" id="nav-devices-count">8</span></button>
+    <button class="nav-item" data-view="inspect">验机<span class="nav-count">3</span></button>
+    <button class="nav-item" data-view="report">报告<span class="nav-count">28</span></button>
+    <button class="nav-item" data-view="batch">批量</button>
+
+    <div class="nav-label">记录</div>
+    <button class="nav-item" data-view="devices">审计</button>
+    <button class="nav-item" data-view="devices">设置</button>
+
+    <div class="rail-foot">
+      <div class="conn"><span class="dot off"></span><span id="conn-text">未连接设备</span></div>
+      <p id="conn-device">插上 USB 后自动刷新</p>
+    </div>
+  </aside>
+
+  <!-- main -->
+  <main class="main">
+    <header class="bar">
+      <div>
+        <h1 id="view-title">回收</h1>
+        <div class="sub" id="view-sub">本周收机 8 台 · 4 台待处理</div>
+      </div>
+      <span class="mode-chip" id="data-mode">示例数据</span>
+      <span class="bar-spacer"></span>
+      <label class="search">
+        <span class="muted" aria-hidden="true">⌕</span>
+        <input id="search" type="search" placeholder="搜索序列号、型号或来源">
+        <kbd>⌘K</kbd>
+      </label>
+      <button class="icon-btn" id="theme-btn" title="切换深色模式" aria-label="切换深色模式">◐</button>
+      <button class="btn" id="export-btn">导出</button>
+      <button class="btn btn-primary" id="intake-open">登记收机</button>
+    </header>
+
+    <div class="views">
+      <!-- devices -->
+      <section class="view" id="view-devices">
+        <div class="stats">
+          <div class="stat"><div class="v">8</div><div class="l">在库</div></div>
+          <div class="stat"><div class="v" style="color:var(--clean)">3</div><div class="l">干净</div></div>
+          <div class="stat"><div class="v" style="color:var(--lock)">3</div><div class="l">异常</div></div>
+          <div class="stat"><div class="v" style="color:var(--unknown)">2</div><div class="l">未验证</div></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>状态</th><th>设备</th><th>型号</th><th>系统</th>
+                <th>序列号</th><th>来源</th><th>上次检测</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+          <div class="table-foot" id="table-foot"></div>
+        </div>
+      </section>
+
+      <!-- recycle -->
+      <section class="view active" id="view-recycle">
+        <div class="stats">
+          <div class="stat"><div class="v" id="stat-total">8</div><div class="l">本周收机</div></div>
+          <div class="stat"><div class="v" id="stat-pending">4</div><div class="l">待处理</div></div>
+          <div class="stat"><div class="v" id="stat-sold">0</div><div class="l">已售出</div></div>
+          <div class="stat"><div class="v" id="stat-amount">¥18,020</div><div class="l">本周回收额</div></div>
+        </div>
+        <div class="board" id="board"></div>
+      </section>
+
+      <!-- inspect -->
+      <section class="view" id="view-inspect">
+        <div class="wizard">
+          <div class="stepper" aria-label="验机步骤">
+            <div class="step current" data-step="1"><span class="n">1</span>连接设备</div>
+            <span class="step-line"></span>
+            <div class="step" data-step="2"><span class="n">2</span>设备身份</div>
+            <span class="step-line"></span>
+            <div class="step" data-step="3"><span class="n">3</span>锁判定</div>
+            <span class="step-line"></span>
+            <div class="step" data-step="4"><span class="n">4</span>硬件体检</div>
+            <span class="step-line"></span>
+            <div class="step" data-step="5"><span class="n">5</span>出报告</div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3 id="wiz-name">—</h3>
+              <span class="sub" id="wiz-sub">向 Apple 激活服务器发一次标准激活请求</span>
+              <span style="flex:1"></span>
+              <span class="mono muted" id="wiz-elapsed">—</span>
+            </div>
+            <div class="panel-body">
+              <div class="verdict-row">
+                <div class="verdict-hero">
+                  <div class="big unknown" id="wiz-verdict">等待检测</div>
+                  <p id="wiz-hint">点击「开始检测」后，会向 Apple 发起一次标准激活请求。</p>
+                  <div class="actions">
+                    <button class="btn btn-primary" id="wiz-action" disabled>检测中…</button>
+                    <button class="btn" id="wiz-back">返回看板</button>
+                  </div>
+                </div>
+                <div class="evidence-card">
+                  <div class="k" id="wiz-account-label">绑定账户</div>
+                  <div class="acct" id="wiz-account" style="display:none">—</div>
+                  <div class="k" style="margin-top:14px">激活状态</div>
+                  <div class="mono" id="wiz-state">—</div>
+                  <div class="k" style="margin-top:14px">服务器原话</div>
+                  <div class="quote" style="margin-top:4px" id="wiz-quote">—</div>
+                </div>
+              </div>
+
+              <div class="note" id="wiz-note" style="display:none"></div>
+
+              <div class="section-title" style="margin-top:26px">证据链</div>
+              <dl class="kv">
+                <dt>序列号</dt><dd id="wiz-serial">—</dd>
+                <dt>IMEI</dt><dd id="wiz-imei">—</dd>
+                <dt>型号</dt><dd id="wiz-model">—</dd>
+                <dt>系统</dt><dd id="wiz-ios">—</dd>
+                <dt>检测时间</dt><dd id="wiz-time">—</dd>
+              </dl>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- report -->
+      <section class="view" id="view-report">
+        <div class="report-wrap">
+          <article class="sheet">
+            <div class="sheet-head">
+              <div>
+                <h2>设备验机报告</h2>
+                <div class="muted" style="font-size:12px;margin-top:2px">fleetctl · 只读检测，未修改设备</div>
+              </div>
+              <div class="meta">
+                No. FC-2026-1121-014<br>
+                2026-11-21 13:42
+              </div>
+            </div>
+
+            <h4>设备标识</h4>
+            <table>
+              <tr><th>机型</th><td>iPhone 15（iPhone16,1）</td><th>序列号</th><td class="mono">GN762JNQYM</td></tr>
+              <tr><th>IMEI</th><td class="mono">355589712887838</td><th>系统</th><td>iOS 27.2 (24B119)</td></tr>
+            </table>
+
+            <h4>结论</h4>
+            <div class="conclusion">
+              <div class="t">激活锁 — 不建议交易</div>
+              <p>设备绑定在他人 Apple 账户下，服务器拒绝激活。该锁定在擦除后仍然存在。</p>
+            </div>
+
+            <h4>服务器判定</h4>
+            <table>
+              <tr><th>判定结果</th><td>Activation Lock</td></tr>
+              <tr><th>绑定账户</th><td class="mono">d•••••@6•••••.com</td></tr>
+              <tr><th>激活状态</th><td class="mono">Unactivated</td></tr>
+            </table>
+
+            <div class="sheet-foot">
+              <span>SHA-256 93f2…c41a</span>
+              <span>只读检测 · 记录不可篡改</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- batch -->
+      <section class="view" id="view-batch">
+        <div class="stats">
+          <div class="stat"><div class="v" id="batch-total">0</div><div class="l">在册设备</div></div>
+          <div class="stat"><div class="v" id="batch-selected">0</div><div class="l">已选</div></div>
+          <div class="stat"><div class="v" id="batch-done">0</div><div class="l">已完成</div></div>
+          <div class="stat"><div class="v" id="batch-clean" style="color:var(--clean)">0</div><div class="l">干净</div></div>
+        </div>
+
+        <div class="batch-bar">
+          <label class="check"><input type="checkbox" id="batch-all"> 全选</label>
+          <span class="muted" id="batch-hint">勾选设备后开始检测，结果会直接分流到待定价或退回</span>
+          <span style="flex:1"></span>
+          <button class="btn" id="batch-cancel" disabled>停止</button>
+          <button class="btn btn-primary" id="batch-start">开始检测</button>
+        </div>
+        <div class="progress" id="batch-progress" hidden>
+          <div class="progress-fill" id="batch-progress-fill"></div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="batch-table">
+            <thead>
+              <tr>
+                <th style="width:40px"></th><th>设备</th><th>序列号</th>
+                <th>系统</th><th>当前状态</th><th>本次结果</th>
+              </tr>
+            </thead>
+            <tbody id="batch-rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- inspector -->
+  <aside class="inspector" id="inspector" aria-label="设备详情">
+    <div class="insp-head">
+      <div class="row">
+        <div style="flex:1">
+          <h2 id="insp-name">iPhone 15</h2>
+          <div class="model" id="insp-model">iPhone16,1 · CH/A</div>
+        </div>
+        <span id="insp-badge" class="badge lock">激活锁</span>
+        <button class="icon-btn insp-close" id="insp-close" aria-label="关闭详情">×</button>
+      </div>
+    </div>
+    <div class="insp-body">
+      <div class="verdict">
+        <div class="k">判定</div>
+        <div class="v lock" id="insp-verdict">绑定他人账户</div>
+        <div class="hint" id="insp-hint">只有账户持有人退出 iCloud，或凭原始发票由 Apple 移除。</div>
+      </div>
+
+      <div class="section-title">设备信息</div>
+      <dl class="kv">
+        <dt>序列号</dt><dd id="insp-serial">GN762JNQYM</dd>
+        <dt>IMEI</dt><dd id="insp-imei">355589712887838</dd>
+        <dt>系统</dt><dd id="insp-ios">iOS 27.2</dd>
+        <dt>来源</dt><dd class="plain" id="insp-source">闲鱼</dd>
+        <dt>报价</dt><dd id="insp-price">—</dd>
+        <dt id="insp-sale-label" style="display:none">出货价</dt><dd id="insp-sale" style="display:none">—</dd>
+        <dt id="insp-margin-label" style="display:none">毛利</dt><dd id="insp-margin" style="display:none">—</dd>
+        <dt id="insp-sold-label" style="display:none">售价</dt><dd id="insp-sold" style="display:none">—</dd>
+        <dt id="insp-buyer-label" style="display:none">买家</dt><dd id="insp-buyer" style="display:none">—</dd>
+        <dt>检测时间</dt><dd id="insp-time">11-21 13:42</dd>
+      </dl>
+
+      <div class="section-title">最近一次判定</div>
+      <div class="quote" id="insp-quote">Activation Lock
+This iPhone is linked to an Apple account.
+d•••••@6•••••.com</div>
+
+      <div class="section-title">处理建议</div>
+      <ul class="advice" id="insp-advice"></ul>
+    </div>
+    <div class="insp-foot">
+      <button class="btn">查看报告</button>
+      <button class="btn btn-primary" id="insp-action">重新检测</button>
+    </div>
+  </aside>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<div class="scrim" id="scrim"></div>
+<div class="modal" id="intake-modal" role="dialog" aria-modal="true" aria-labelledby="intake-title">
+  <div class="modal-head">
+    <h3 id="intake-title">收机登记</h3>
+    <span class="hint">登记后进入「待检测」</span>
+    <span style="flex:1"></span>
+    <button class="icon-btn" id="intake-close" aria-label="关闭">×</button>
+  </div>
+  <form id="intake-form">
+    <div class="modal-body">
+      <div class="field">
+        <label for="f-model">机型</label>
+        <select id="f-model" required>
+          <option value="">选择机型</option>
+          <option value="iPhone 15" data-type="iPhone16,1" data-ref="2600">iPhone 15</option>
+          <option value="iPhone 16 Pro Max" data-type="iPhone17,2" data-ref="5200">iPhone 16 Pro Max</option>
+          <option value="iPhone 14 Pro" data-type="iPhone15,2" data-ref="2900">iPhone 14 Pro</option>
+          <option value="iPhone 13" data-type="iPhone14,5" data-ref="1600">iPhone 13</option>
+          <option value="iPhone 12" data-type="iPhone13,2" data-ref="1100">iPhone 12</option>
+          <option value="iPhone SE (3rd)" data-type="iPhone14,6" data-ref="900">iPhone SE (3rd)</option>
+          <option value="iPad Air 5" data-type="iPad13,2" data-ref="2100">iPad Air 5</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-storage">容量</label>
+        <select id="f-storage">
+          <option>128GB</option>
+          <option>256GB</option>
+          <option>512GB</option>
+          <option>1TB</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-serial">序列号 / IMEI</label>
+        <input id="f-serial" placeholder="可稍后检测时读取" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="f-source">来源渠道</label>
+        <select id="f-source">
+          <option>闲鱼</option>
+          <option>档口</option>
+          <option>客户回收</option>
+          <option>同行调货</option>
+          <option>批量入库</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>成色</label>
+        <div class="seg" id="f-grade" role="group" aria-label="成色">
+          <button type="button" data-grade="A" aria-pressed="true">A 准新</button>
+          <button type="button" data-grade="B" aria-pressed="false">B 轻微</button>
+          <button type="button" data-grade="C" aria-pressed="false">C 明显</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="f-seller">卖家 / 联系人</label>
+        <input id="f-seller" placeholder="例如 老李" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="f-price">报价</label>
+        <input id="f-price" type="number" min="0" step="10" placeholder="0" required>
+      </div>
+      <div class="field">
+        <label for="f-note">备注</label>
+        <input id="f-note" placeholder="配件、磕碰、是否拆修" autocomplete="off">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn" id="intake-cancel">取消</button>
+      <button type="submit" class="btn btn-primary">登记并检测</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal" id="price-modal" role="dialog" aria-modal="true" aria-labelledby="price-title">
+  <div class="modal-head">
+    <h3 id="price-title">定价入库</h3>
+    <span class="hint" id="price-sub">—</span>
+    <span style="flex:1"></span>
+    <button class="icon-btn" id="price-close" aria-label="关闭">×</button>
+  </div>
+  <form id="price-form">
+    <div class="modal-body">
+      <div class="field">
+        <label for="p-buy">回收价</label>
+        <input id="p-buy" type="number" min="0" step="10" required>
+      </div>
+      <div class="field">
+        <label for="p-sale">预计出货价</label>
+        <input id="p-sale" type="number" min="0" step="10" required>
+      </div>
+      <div class="field wide">
+        <div class="margin-box">
+          <div><div class="k">毛利</div><div class="v" id="p-margin">¥0</div></div>
+          <div><div class="k">毛利率</div><div class="v" id="p-rate">0%</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn" id="price-cancel">取消</button>
+      <button type="submit" class="btn btn-primary">确认入库</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal" id="sale-modal" role="dialog" aria-modal="true" aria-labelledby="sale-title">
+  <div class="modal-head">
+    <h3 id="sale-title">确认售出</h3>
+    <span class="hint" id="sale-sub">—</span>
+    <span style="flex:1"></span>
+    <button class="icon-btn" id="sale-close" aria-label="关闭">×</button>
+  </div>
+  <form id="sale-form">
+    <div class="modal-body">
+      <div class="field">
+        <label for="s-price">售出价</label>
+        <input id="s-price" type="number" min="0" step="10" required>
+      </div>
+      <div class="field">
+        <label for="s-date">成交日期</label>
+        <input id="s-date" type="date" required>
+      </div>
+      <div class="field wide">
+        <label for="s-buyer">买家 / 渠道</label>
+        <input id="s-buyer" placeholder="例如 闲鱼 · 陈先生" autocomplete="off">
+      </div>
+      <div class="field wide">
+        <div class="margin-box">
+          <div><div class="k">实际毛利</div><div class="v" id="s-margin">¥0</div></div>
+          <div><div class="k">毛利率</div><div class="v" id="s-rate">0%</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn" id="sale-cancel">取消</button>
+      <button type="submit" class="btn btn-primary">确认售出</button>
+    </div>
+  </form>
+</div>
+
+<script>
+const devices = [
+  { id:"d1", name:"iPhone 15", model:"iPhone16,1 · CH/A", ios:"27.2", serial:"GN762JNQYM",
+    imei:"355589712887838", source:"闲鱼", time:"11-21 13:42", status:"lock",
+    stage:"testing", price:"¥2,150", seller:"陈先生",
+    verdict:"绑定他人账户", hint:"只有账户持有人退出 iCloud，或凭原始发票由 Apple 移除。",
+    account:"d•••••@6•••••.com" },
+  { id:"d2", name:"iPhone 13", model:"iPhone14,5 · CH/A", ios:"17.1", serial:"F2LXT0ABCDEF",
+    imei:"353912345678901", source:"档口", time:"11-21 11:08", status:"clean",
+    stage:"stocked", price:"¥1,480", seller:"老李",
+    verdict:"服务器接受激活", hint:"未检测到激活锁或远程管理，可以正常激活。", account:null },
+  { id:"d3", name:"iPhone 14 Pro", model:"iPhone15,2 · CH/A", ios:"26.0", serial:"H4W9K2MNOPQR",
+    imei:"356700112233445", source:"客户回收", time:"11-21 10:31", status:"mdm",
+    stage:"returned", price:"¥3,200", seller:"王女士",
+    verdict:"受机构管理", hint:"设备由企业或租赁机构监管，需该机构解除。", account:null,
+    org:"Acme Corporation" },
+  { id:"d4", name:"iPad Air 5", model:"iPad13,2 · CH/A", ios:"26.2", serial:"DLXQ3FGHIJKL",
+    imei:"—", source:"批量入库", time:"11-20 18:02", status:"unknown",
+    stage:"await", price:"¥2,600", seller:"仓库",
+    verdict:"未验证", hint:"网络或协议失败，没有得到结论。不能当作干净设备。", account:null },
+  { id:"d5", name:"iPhone 12", model:"iPhone13,2 · CH/A", ios:"18.0", serial:"G0N8P7QRSTUV",
+    imei:"352199887766554", source:"闲鱼", time:"11-20 16:45", status:"clean",
+    stage:"stocked", price:"¥1,050", seller:"张先生",
+    verdict:"服务器接受激活", hint:"未检测到激活锁或远程管理，可以正常激活。", account:null },
+  { id:"d6", name:"iPhone 16 Pro Max", model:"iPhone17,2 · CH/A", ios:"27.2", serial:"K9M2N4PQRSTU",
+    imei:"357700445566778", source:"档口", time:"11-20 15:12", status:"lock",
+    stage:"pricing", price:"¥5,400", seller:"老李",
+    verdict:"绑定他人账户", hint:"只有账户持有人退出 iCloud，或凭原始发票由 Apple 移除。",
+    account:"x•••••@qq.com" },
+  { id:"d7", name:"iPhone SE (3rd)", model:"iPhone14,6 · CH/A", ios:"26.1", serial:"J5V7W9XYZABC",
+    imei:"354400112233990", source:"维修", time:"11-20 14:03", status:"clean",
+    stage:"stocked", price:"¥1,380", seller:"维修部",
+    verdict:"服务器接受激活", hint:"未检测到激活锁或远程管理，可以正常激活。", account:null },
+  { id:"d8", name:"iPhone 11", model:"iPhone12,1 · CH/A", ios:"17.6", serial:"C8D9E0F1G2H3",
+    imei:"351122334455667", source:"同行调货", time:"11-20 09:27", status:"unknown",
+    stage:"await", price:"¥760", seller:"王老板",
+    verdict:"未验证", hint:"设备已激活，需抹机后重新检测才能得出锁状态。", account:null }
+];
+
+// The bundled rows are demo data: they disappear as soon as real hardware
+// shows up, but stay usable while nothing is connected.
+devices.forEach(d => { d.demo = true; });
+
+const labels = { clean:"干净", lock:"激活锁", mdm:"MDM", unknown:"未验证" };
+let selectedId = "d1";
+let current = null;
+
+// In the Tauri shell the UI is served from tauri://localhost, so the bridge
+// must be addressed explicitly. In the browser preview it is same-origin.
+const API_BASE =
+  location.origin === "http://127.0.0.1:4174" || location.origin === "http://localhost:4174"
+    ? ""
+    : "http://127.0.0.1:4174";
+
+const rowsEl = document.getElementById("rows");
+const appEl = document.getElementById("app");
+
+function rowHTML(d) {
+  return `<tr data-id="${d.id}" class="${d.id === selectedId ? "selected" : ""}" tabindex="0">
+    <td><span class="badge ${d.status}">${labels[d.status]}</span></td>
+    <td><div class="dev-name">${d.name}</div><div class="dev-model">${d.model}</div></td>
+    <td class="mono">${d.model.split(" · ")[0]}</td>
+    <td class="mono">${d.ios}</td>
+    <td class="mono">${d.serial}</td>
+    <td class="muted">${d.source}</td>
+    <td class="mono muted">${d.time}</td>
+  </tr>`;
+}
+
+function renderTable(filter = "") {
+  const q = filter.trim().toLowerCase();
+  const list = devices.filter(d =>
+    !q || [d.name, d.model, d.serial, d.source, d.imei].join(" ").toLowerCase().includes(q)
+  );
+  rowsEl.innerHTML = list.length
+    ? list.map(rowHTML).join("")
+    : `<tr class="empty-row"><td colspan="7">
+         <div class="empty">
+           <div class="t">没有匹配的设备</div>
+           <div class="hint">换个序列号、型号或来源试试。</div>
+         </div>
+       </td></tr>`;
+  document.getElementById("table-foot").textContent =
+    `显示 ${list.length} 台 · 共 ${devices.length} 台在库`;
+  const trs = [...rowsEl.querySelectorAll("tr[data-id]")];
+  trs.forEach((tr, i) => {
+    const pick = () => selectDevice(tr.dataset.id);
+    tr.addEventListener("click", pick);
+    tr.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); return; }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const next = trs[i + (e.key === "ArrowDown" ? 1 : -1)];
+        if (next) next.focus();
+      }
+    });
+  });
+}
+
+const stages = [
+  { key: "await", name: "待检测" },
+  { key: "testing", name: "检测中" },
+  { key: "pricing", name: "待定价" },
+  { key: "stocked", name: "已入库" },
+  { key: "sold", name: "已售出" },
+  { key: "returned", name: "退回" },
+];
+
+function renderBoard() {
+  const board = document.getElementById("board");
+  board.innerHTML = stages.map(s => {
+    const list = devices.filter(d => d.stage === s.key);
+    const cards = list.map(d => `
+      <button class="card ${d.status} ${d.id === selectedId ? "selected" : ""}" data-id="${d.id}">
+        <span class="top"><span class="name">${d.name}</span><span class="price">${d.price}</span></span>
+        <span class="serial">${d.serial}</span>
+        <span class="foot"><span class="badge ${d.status}">${labels[d.status]}</span>${d.demo ? '<span class="demo-tag">示例</span>' : ""}<span class="seller">${d.source} · ${d.seller}</span></span>
+      </button>`).join("");
+    return `<section class="col">
+      <header class="col-head"><span class="col-name">${s.name}</span><span class="col-count">${list.length}</span></header>
+      <div class="cards">${cards || '<div class="col-empty">暂无设备</div>'}</div>
+    </section>`;
+  }).join("");
+  board.querySelectorAll(".card").forEach(card => {
+    card.addEventListener("click", () => {
+      selectDevice(card.dataset.id);
+      appEl.classList.remove("no-inspector");
+      appEl.classList.add("overlay-inspector");
+    });
+  });
+}
+
+function selectDevice(id, open = true) {
+  selectedId = id;
+  const d = devices.find(x => x.id === id);
+  if (!d) return;
+  current = d;
+  renderTable(document.getElementById("search").value);
+  document.querySelectorAll(".card").forEach(card => {
+    card.classList.toggle("selected", card.dataset.id === id);
+  });
+
+  document.getElementById("insp-name").textContent = d.name;
+  document.getElementById("insp-model").textContent = d.model;
+  document.getElementById("insp-serial").textContent = d.serial;
+  document.getElementById("insp-imei").textContent = d.imei;
+  document.getElementById("insp-ios").textContent = "iOS " + d.ios;
+  document.getElementById("insp-source").textContent = d.source;
+  document.getElementById("insp-time").textContent = d.time;
+  document.getElementById("insp-price").textContent = d.price || "—";
+
+  const showSale = Boolean(d.salePrice);
+  document.getElementById("insp-sale-label").style.display = showSale ? "" : "none";
+  document.getElementById("insp-sale").style.display = showSale ? "" : "none";
+  document.getElementById("insp-sale").textContent = d.salePrice || "—";
+
+  const showMargin = typeof d.margin === "number";
+  document.getElementById("insp-margin-label").style.display = showMargin ? "" : "none";
+  document.getElementById("insp-margin").style.display = showMargin ? "" : "none";
+  document.getElementById("insp-margin").textContent = showMargin
+    ? "¥" + d.margin.toLocaleString("en-US")
+    : "—";
+
+  const showSold = Boolean(d.soldPrice);
+  document.getElementById("insp-sold-label").style.display = showSold ? "" : "none";
+  document.getElementById("insp-sold").style.display = showSold ? "" : "none";
+  document.getElementById("insp-sold").textContent = d.soldPrice || "—";
+  document.getElementById("insp-buyer-label").style.display = showSold ? "" : "none";
+  document.getElementById("insp-buyer").style.display = showSold ? "" : "none";
+  document.getElementById("insp-buyer").textContent = d.buyer || "—";
+
+  const badge = document.getElementById("insp-badge");
+  badge.className = "badge " + d.status;
+  badge.textContent = labels[d.status];
+
+  const v = document.getElementById("insp-verdict");
+  v.className = "v " + d.status;
+  v.textContent = d.verdict;
+  document.getElementById("insp-hint").textContent = d.hint;
+
+  let quote = "";
+  if (d.status === "lock") quote = `Activation Lock\nThis iPhone is linked to an Apple account.\n${d.account}`;
+  else if (d.status === "mdm") quote = `Remote Management\nThis iPhone is managed by ${d.org}.`;
+  else if (d.status === "clean") quote = `Activation server accepted the request;\nno lock challenge returned.`;
+  else quote = `Activation probe did not reach a verdict.\nTreat this device as unverified.`;
+  document.getElementById("insp-quote").textContent = quote;
+  const action = primaryAction(d);
+  const primaryBtn = document.getElementById("insp-action");
+  primaryBtn.style.display = action === "report" ? "none" : "";
+  primaryBtn.textContent = ACTION_LABELS[action];
+
+  const advice = {
+    lock: [
+      "让卖家退出 iCloud，或提供原始发票由 Apple 移除",
+      "锁定解除前不要垫付尾款或确认收货",
+      "留存本次报告，作为退款与报警的证据",
+    ],
+    mdm: [
+      "联系设备所属机构申请释放",
+      "企业监管机无法自行解除，不要继续投入",
+      "不要擦除，擦除不会移除 MDM",
+    ],
+    clean: [
+      "可以入库；保存本次报告作为交付凭证",
+      "交付前建议再执行一次抹机复验",
+      "核对序列号与机身、包装是否一致",
+    ],
+    unknown: [
+      "抹机后重新检测，出结论前不要按干净机处理",
+      "检查数据线与 USB 连接是否稳定",
+      "网络异常时换网络重试",
+    ],
+  }[d.status];
+  document.getElementById("insp-advice").innerHTML = advice.map(t => `<li>${t}</li>`).join("");
+
+  appEl.classList.add("inspecting");
+  if (!open) appEl.classList.remove("inspecting");
+}
+
+let toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2200);
+}
+
+let inspectDevice = null;
+
+const VERDICTS = {
+  clean: {
+    title: "服务器接受激活",
+    hint: "未检测到激活锁或远程管理，可以正常激活。",
+    quote: "Activation server accepted the request;\nno lock challenge returned.",
+    note: null,
+    action: "继续定价",
+  },
+  lock: {
+    title: "绑定他人账户",
+    hint: "只有账户持有人退出 iCloud，或凭原始发票由 Apple 移除。",
+    note: "<strong>不要擦除。</strong>激活锁不在设备本地，抹机只会丢掉证据，最后停在同一页。",
+    action: "标记退货",
+  },
+  mdm: {
+    title: "受机构管理",
+    hint: "设备由企业或租赁机构监管，需该机构解除。",
+    note: "<strong>不要擦除。</strong>MDM 由服务器下发，擦除不会移除。",
+    action: "标记退货",
+  },
+  unknown: {
+    title: "未验证",
+    hint: "网络或协议失败，没有得到结论。不能当作干净设备。",
+    quote: "Activation probe did not reach a verdict.\nTreat this device as unverified.",
+    note: "<strong>没有结论。</strong>换稳定网络后重新检测，不要按干净机入库。",
+    action: "重新检测",
+  },
+};
+
+function seedOf(d) {
+  return [...(String(d.serial) + d.id)].reduce((a, c) => a + c.charCodeAt(0), 0);
+}
+
+function simulatedVerdict(d) {
+  if (d.status !== "unknown") return d.status;
+  const mod = seedOf(d) % 10;
+  return mod < 6 ? "clean" : mod < 8 ? "lock" : "mdm";
+}
+
+function maskAccount(d) {
+  const seed = seedOf(d);
+  return `${String.fromCharCode(97 + (seed % 26))}•••••@${seed % 2 ? "qq" : "163"}.com`;
+}
+
+function setSteps(active, doneUpTo) {
+  document.querySelectorAll("#view-inspect .step").forEach(step => {
+    const n = Number(step.dataset.step);
+    step.className = "step" + (n <= doneUpTo ? " done" : n === active ? " current" : "");
+  });
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function openInspect(id) {
+  const d = devices.find(x => x.id === id);
+  if (!d) return;
+  inspectDevice = d;
+  current = d;
+
+  switchView("inspect");
+  document.getElementById("view-title").textContent = "验机";
+  document.getElementById("view-sub").textContent = `${d.name} · 检测中`;
+
+  document.getElementById("wiz-name").textContent = d.name;
+  document.getElementById("wiz-sub").textContent = `${d.model} · 第 3 步 / 共 5 步`;
+  document.getElementById("wiz-serial").textContent = d.serial;
+  document.getElementById("wiz-imei").textContent = d.imei;
+  document.getElementById("wiz-model").textContent = d.model;
+  document.getElementById("wiz-ios").textContent = d.ios === "—" ? "—" : "iOS " + d.ios;
+  document.getElementById("wiz-time").textContent = "检测中";
+  document.getElementById("wiz-elapsed").textContent = "—";
+  document.getElementById("wiz-account").style.display = "none";
+  document.getElementById("wiz-account-label").style.display = "none";
+  document.getElementById("wiz-quote").textContent = "—";
+  document.getElementById("wiz-state").textContent = "—";
+
+  const note = document.getElementById("wiz-note");
+  note.style.display = "none";
+  note.className = "note";
+
+  const action = document.getElementById("wiz-action");
+  action.disabled = true;
+  action.textContent = "检测中…";
+
+  await runInspection(d);
+}
+
+async function runInspection(d) {
+  const verdict = document.getElementById("wiz-verdict");
+  const start = performance.now();
+
+  setSteps(1, 0);
+  verdict.className = "big unknown";
+  verdict.innerHTML = '<span class="dot-live"></span>正在连接设备…';
+  await sleep(450);
+
+  setSteps(2, 1);
+  verdict.innerHTML = '<span class="dot-live"></span>读取设备身份…';
+  document.getElementById("wiz-state").textContent = "Unactivated";
+  await sleep(550);
+
+  setSteps(3, 2);
+  verdict.innerHTML = '<span class="dot-live"></span>正在向 Apple 查询…';
+
+  let result;
+  if (d.real && d.udid) {
+    try {
+      const res = await fetch(`${API_BASE}/api/inspect?udid=${encodeURIComponent(d.udid)}`, { cache: "no-store" });
+      const data = await res.json();
+      if (data.ok) {
+        result = data.probe.status;
+        applyRealProbe(d, data.probe, result);
+        document.getElementById("wiz-state").textContent = data.probe.activation_state || "—";
+      } else {
+        result = "unknown";
+        d.status = "unknown";
+        d.hint = `检测失败：${data.error || "未知错误"}`;
+        document.getElementById("wiz-state").textContent = "—";
+      }
+    } catch (err) {
+      result = "unknown";
+      d.status = "unknown";
+      d.hint = "连不上本地桥，确认 python3 prototype/server.py 正在运行。";
+      document.getElementById("wiz-state").textContent = "—";
+    }
+  } else {
+    await sleep(900);
+    result = simulatedVerdict(d);
+    applyVerdict(d, result);
+    document.getElementById("wiz-state").textContent = "Unactivated";
+  }
+
+  showVerdict(d, result);
+  setSteps(3, 2);
+
+  document.getElementById("wiz-elapsed").textContent =
+    ((performance.now() - start) / 1000).toFixed(1) + "s";
+  document.getElementById("wiz-time").textContent = d.time;
+  saveManualDevices();
+}
+
+function applyVerdict(d, result) {
+  d.status = result;
+  d.time = "刚刚";
+  if (result === "clean") {
+    d.verdict = "服务器接受激活";
+    d.hint = VERDICTS.clean.hint;
+    d.account = null;
+    delete d.org;
+  } else if (result === "lock") {
+    d.verdict = "绑定他人账户";
+    d.hint = VERDICTS.lock.hint;
+    d.account = d.account || maskAccount(d);
+    delete d.org;
+  } else if (result === "mdm") {
+    d.verdict = "受机构管理";
+    d.hint = VERDICTS.mdm.hint;
+    d.org = d.org || "Acme Corporation";
+    d.account = null;
+  }
+}
+
+function applyRealProbe(d, probe, result) {
+  d.status = result;
+  d.time = "刚刚";
+  d.serverQuote = probe.server_message || null;
+
+  if (result === "lock") {
+    d.verdict = "绑定他人账户";
+    d.hint = "服务器要求输入 Apple 账户，设备存在激活锁。";
+    d.account = probe.masked_account || "—";
+    delete d.org;
+  } else if (result === "mdm") {
+    d.verdict = "受机构管理";
+    d.hint = "服务器返回远程管理，需所属机构解除。";
+    d.org = probe.organization || "—";
+    d.account = null;
+  } else if (result === "clean") {
+    d.verdict = "服务器接受激活";
+    d.hint = "服务器接受了激活请求，未返回锁挑战。";
+    d.account = null;
+    delete d.org;
+  } else {
+    d.verdict = "未验证";
+    d.hint = probe.verdict === "pending_erase"
+      ? "设备已激活，抹机后才能复验锁状态。"
+      : "没有得到结论，不能当作干净设备。";
+    d.account = null;
+    delete d.org;
+  }
+}
+
+function showVerdict(d, result) {
+  const V = VERDICTS[result];
+
+  const verdict = document.getElementById("wiz-verdict");
+  verdict.className = "big " + result;
+  verdict.textContent = V.title;
+  document.getElementById("wiz-hint").textContent = d.hint || V.hint;
+
+  const account = document.getElementById("wiz-account");
+  const label = document.getElementById("wiz-account-label");
+  if (result === "lock") {
+    label.style.display = "block";
+    label.textContent = "绑定账户";
+    account.textContent = d.account;
+    account.style.display = "block";
+  } else if (result === "mdm") {
+    label.style.display = "block";
+    label.textContent = "所属机构";
+    account.textContent = d.org;
+    account.style.display = "block";
+  } else {
+    label.style.display = "none";
+    account.style.display = "none";
+  }
+
+  document.getElementById("wiz-quote").textContent = d.serverQuote ||
+    (result === "lock"
+      ? `Activation Lock\nThis iPhone is linked to an Apple account.\n${d.account}`
+      : result === "mdm"
+        ? `Remote Management\nThis iPhone is managed by ${d.org}.`
+        : V.quote || "—");
+
+  const note = document.getElementById("wiz-note");
+  if (V.note) {
+    note.innerHTML = V.note;
+    note.className = "note " + result;
+    note.style.display = "block";
+  } else {
+    note.style.display = "none";
+  }
+
+  const action = document.getElementById("wiz-action");
+  action.disabled = false;
+  action.textContent = V.action;
+}
+
+document.getElementById("wiz-action").addEventListener("click", () => {
+  const d = inspectDevice;
+  if (!d) return;
+  if (d.status === "unknown") {
+    runInspection(d);
+    return;
+  }
+  if (d.status === "clean") {
+    d.stage = "pricing";
+    toast(`${d.name} 已进入待定价`);
+  } else {
+    d.stage = "returned";
+    toast(`${d.name} 已标记退货`);
+  }
+  renderBoard();
+  renderTable();
+  updateStats();
+  switchView("recycle");
+});
+
+document.getElementById("wiz-back").addEventListener("click", () => switchView("recycle"));
+
+function openIntake() {
+  document.getElementById("scrim").classList.add("show");
+  document.getElementById("intake-modal").classList.add("show");
+  document.getElementById("f-model").focus();
+}
+
+function closeIntake() {
+  document.getElementById("scrim").classList.remove("show");
+  document.getElementById("intake-modal").classList.remove("show");
+  document.getElementById("intake-open").focus();
+}
+
+function pendingCount() {
+  return devices.filter(d => ["await", "testing", "pricing"].includes(d.stage)).length;
+}
+
+function updateStats() {
+  const pending = pendingCount();
+  const sold = devices.filter(d => d.stage === "sold").length;
+  const amount = devices.reduce(
+    (sum, d) => sum + Number(String(d.price).replace(/[^\d]/g, "") || 0), 0
+  );
+  document.getElementById("stat-total").textContent = devices.length;
+  document.getElementById("stat-pending").textContent = pending;
+  document.getElementById("stat-sold").textContent = sold;
+  document.getElementById("stat-amount").textContent = "¥" + amount.toLocaleString("en-US");
+  document.getElementById("nav-recycle-count").textContent = pending;
+  document.getElementById("nav-devices-count").textContent = devices.length;
+  if (document.getElementById("view-recycle").classList.contains("active")) {
+    document.getElementById("view-sub").textContent =
+      `${devices.length} 台本周收机 · ${pending} 台待处理`;
+  }
+}
+
+async function loadManualDevices() {
+  try {
+    const res = await fetch(`${API_BASE}/api/store`, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok || !data.devices.length) return false;
+
+    for (let i = devices.length - 1; i >= 0; i--) {
+      if (devices[i].demo) devices.splice(i, 1);
+    }
+    data.devices.forEach(row => {
+      if (!devices.some(d => d.id === row.id)) devices.push(row);
+    });
+
+    if (!devices.some(d => d.id === selectedId)) selectedId = devices[0]?.id;
+    renderTable();
+    renderBoard();
+    updateStats();
+    if (selectedId) selectDevice(selectedId, false);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+function manualDevices() {
+  return devices.filter(d => !d.real && !d.demo);
+}
+
+let saveTimer = null;
+function saveManualDevices() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      await fetch(`${API_BASE}/api/store`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ devices: manualDevices() }),
+      });
+    } catch (err) {
+      // Bridge offline: keep the in-memory state.
+    }
+  }, 300);
+}
+
+let lastRealSignature = "";
+let connecting = true;
+
+function deviceCard(entry) {
+  return {
+    id: "r" + entry.udid.replace(/[^a-zA-Z0-9]/g, ""),
+    udid: entry.udid,
+    real: true,
+    name: entry.name,
+    model: `${entry.product_type} · ${entry.region}`,
+    ios: entry.ios,
+    serial: entry.serial,
+    imei: entry.imei,
+    source: "USB",
+    time: "已连接",
+    status: "unknown",
+    stage: "await",
+    price: "—",
+    seller: "本机",
+    verdict: "未验证",
+    hint: "已连接，尚未检测。",
+    account: null,
+  };
+}
+
+function updateConnectionUI(count) {
+  document.getElementById("conn-text").textContent = count
+    ? `已连接 ${count} 台设备`
+    : "未连接设备";
+  const first = devices.find(d => d.real);
+  document.getElementById("conn-device").textContent = count
+    ? (count === 1 ? `USB · ${first?.name || "iPhone"}` : `USB · ${count} 台同时连接`)
+    : "插上 USB 后自动刷新";
+  document.querySelector(".conn .dot").classList.toggle("off", count === 0);
+
+  const chip = document.getElementById("data-mode");
+  if (count > 0) {
+    connecting = false;
+    chip.textContent = "实时数据";
+    chip.classList.add("live");
+  } else if (connecting) {
+    chip.textContent = "正在连接…";
+    chip.classList.remove("live");
+  } else {
+    chip.textContent = "示例数据";
+    chip.classList.remove("live");
+  }
+}
+
+async function refreshRealDevices() {
+  try {
+    const res = await fetch(`${API_BASE}/api/devices`, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) return false;
+
+    const incoming = data.devices || [];
+    const incomingIds = new Set(incoming.map(d => d.udid));
+
+    // Drop real devices that were unplugged.
+    for (let i = devices.length - 1; i >= 0; i--) {
+      if (devices[i].real && !incomingIds.has(devices[i].udid)) devices.splice(i, 1);
+    }
+
+    if (incoming.length > 0) {
+      // Real hardware supersedes the bundled demo rows, once.
+      for (let i = devices.length - 1; i >= 0; i--) {
+        if (devices[i].demo) devices.splice(i, 1);
+      }
+
+      incoming.forEach(entry => {
+        const existing = devices.find(d => d.real && d.udid === entry.udid);
+        if (existing) {
+          existing.name = entry.name;
+          existing.model = `${entry.product_type} · ${entry.region}`;
+          existing.ios = entry.ios;
+          existing.serial = entry.serial;
+          existing.imei = entry.imei;
+        } else {
+          devices.unshift(deviceCard(entry));
+        }
+      });
+    }
+
+    updateConnectionUI(incoming.length);
+
+    const signature = incoming.map(d => d.udid).sort().join(",");
+    if (signature !== lastRealSignature) {
+      lastRealSignature = signature;
+      if (!devices.some(d => d.id === selectedId)) selectedId = devices[0]?.id;
+      renderTable();
+      renderBoard();
+      updateStats();
+      if (selectedId) selectDevice(selectedId, false);
+    }
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+async function loadRealDevices(attempt = 0) {
+  const ok = await refreshRealDevices();
+  if (!ok && attempt < 60) {
+    await sleep(500);
+    return loadRealDevices(attempt + 1);
+  }
+  if (!ok) {
+    connecting = false;
+    updateConnectionUI(0);
+  }
+  return ok;
+}
+
+let batchCancel = false;
+
+function renderBatch() {
+  document.getElementById("batch-rows").innerHTML = devices.map(d => `
+    <tr data-id="${d.id}">
+      <td class="center"><input type="checkbox" class="batch-check" ${d.stage === "await" ? "checked" : ""}></td>
+      <td><div class="dev-name">${d.name}</div><div class="batch-sub">${d.model}</div></td>
+      <td class="mono">${d.serial}</td>
+      <td class="mono">${d.ios}</td>
+      <td><span class="badge ${d.status}">${labels[d.status]}</span></td>
+      <td class="batch-result muted">—</td>
+    </tr>`).join("");
+
+  document.querySelectorAll(".batch-check").forEach(box => {
+    box.addEventListener("change", updateBatchCounts);
+  });
+  document.getElementById("batch-all").checked = false;
+  document.getElementById("batch-done").textContent = "0";
+  document.getElementById("batch-clean").textContent =
+    String(devices.filter(d => d.status === "clean").length);
+  updateBatchCounts();
+}
+
+function updateBatchCounts() {
+  const boxes = [...document.querySelectorAll(".batch-check")];
+  document.getElementById("batch-total").textContent = String(devices.length);
+  document.getElementById("batch-selected").textContent =
+    String(boxes.filter(box => box.checked).length);
+}
+
+async function detectOne(d) {
+  if (d.real && d.udid) {
+    try {
+      const res = await fetch(`${API_BASE}/api/inspect?udid=${encodeURIComponent(d.udid)}`, { cache: "no-store" });
+      const data = await res.json();
+      if (data.ok) {
+        applyRealProbe(d, data.probe, data.probe.status);
+        return d.status;
+      }
+    } catch (err) {
+      // fall through to unknown
+    }
+    d.status = "unknown";
+    d.hint = "检测失败，未获得结论。";
+    return "unknown";
+  }
+  await sleep(650);
+  const result = simulatedVerdict(d);
+  applyVerdict(d, result);
+  return result;
+}
+
+async function startBatch() {
+  const boxes = [...document.querySelectorAll(".batch-check")].filter(box => box.checked);
+  if (!boxes.length) { toast("先勾选要检测的设备"); return; }
+
+  const ids = boxes.map(box => box.closest("tr").dataset.id);
+  batchCancel = false;
+
+  const startBtn = document.getElementById("batch-start");
+  const cancelBtn = document.getElementById("batch-cancel");
+  const progress = document.getElementById("batch-progress");
+  const fill = document.getElementById("batch-progress-fill");
+
+  startBtn.disabled = true;
+  cancelBtn.disabled = false;
+  progress.hidden = false;
+  fill.style.width = "0%";
+  document.getElementById("batch-done").textContent = "0";
+
+  let done = 0;
+  let clean = 0;
+  let blocked = 0;
+
+  for (const id of ids) {
+    if (batchCancel) break;
+    const d = devices.find(x => x.id === id);
+    if (!d) continue;
+
+    const row = document.querySelector(`#batch-rows tr[data-id="${id}"]`);
+    const cell = row?.querySelector(".batch-result");
+    row?.classList.add("running");
+    if (cell) cell.innerHTML = '<span class="dot-live"></span>检测中';
+
+    const result = await detectOne(d);
+
+    row?.classList.remove("running");
+    if (cell) cell.innerHTML = `<span class="badge ${result}">${labels[result]}</span>`;
+    const statusBadge = row?.querySelector("td:nth-child(5) .badge");
+    if (statusBadge) {
+      statusBadge.className = "badge " + result;
+      statusBadge.textContent = labels[result];
+    }
+
+    d.stage = result === "clean" ? "pricing" : result === "unknown" ? "await" : "returned";
+    if (result === "clean") clean++;
+    else if (result !== "unknown") blocked++;
+
+    done++;
+    document.getElementById("batch-done").textContent = String(done);
+    fill.style.width = `${Math.round((done / ids.length) * 100)}%`;
+    renderBoard();
+    updateStats();
+  }
+
+  startBtn.disabled = false;
+  cancelBtn.disabled = true;
+  document.getElementById("batch-clean").textContent =
+    String(devices.filter(d => d.status === "clean").length);
+
+  const stopped = done < ids.length;
+  saveManualDevices();
+  toast(
+    `${stopped ? "已停止" : "批量检测完成"} · ${done} 台：${clean} 台干净进待定价，${blocked} 台锁定进退回`
+  );
+}
+
+document.getElementById("batch-all").addEventListener("change", e => {
+  document.querySelectorAll(".batch-check").forEach(box => { box.checked = e.target.checked; });
+  updateBatchCounts();
+});
+document.getElementById("batch-start").addEventListener("click", startBatch);
+document.getElementById("batch-cancel").addEventListener("click", () => { batchCancel = true; });
+
+function primaryAction(d) {
+  if (d.stage === "pricing") return "price";
+  if (d.stage === "stocked") return "sell";
+  if (d.stage === "sold" || d.stage === "returned") return "report";
+  if (d.stage === "await" || d.status === "unknown") return "inspect";
+  if (d.status === "clean") return "stock";
+  return "return";
+}
+
+const ACTION_LABELS = {
+  price: "定价入库",
+  sell: "售出",
+  report: "查看报告",
+  inspect: "开始检测",
+  stock: "入库",
+  return: "标记退货",
+};
+
+let pricingDevice = null;
+
+function updateMargin() {
+  const buy = Number(document.getElementById("p-buy").value || 0);
+  const sale = Number(document.getElementById("p-sale").value || 0);
+  const margin = sale - buy;
+  document.getElementById("p-margin").textContent = "¥" + margin.toLocaleString("en-US");
+  document.getElementById("p-rate").textContent =
+    sale > 0 ? Math.round((margin / sale) * 100) + "%" : "0%";
+}
+
+function openPrice(d) {
+  pricingDevice = d;
+  const buy = Number(String(d.price).replace(/[^\d]/g, "")) || 0;
+  const sale = buy ? Math.round((buy * 1.18) / 10) * 10 : 0;
+
+  document.getElementById("price-sub").textContent = `${d.name} · ${d.serial}`;
+  document.getElementById("p-buy").value = buy || "";
+  document.getElementById("p-sale").value = sale || "";
+  updateMargin();
+
+  document.getElementById("scrim").classList.add("show");
+  document.getElementById("price-modal").classList.add("show");
+  document.getElementById("p-buy").focus();
+}
+
+function closePrice() {
+  document.getElementById("scrim").classList.remove("show");
+  document.getElementById("price-modal").classList.remove("show");
+}
+
+["p-buy", "p-sale"].forEach(id => {
+  document.getElementById(id).addEventListener("input", updateMargin);
+});
+
+document.getElementById("price-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const d = pricingDevice;
+  if (!d) return;
+
+  const buy = Number(document.getElementById("p-buy").value || 0);
+  const sale = Number(document.getElementById("p-sale").value || 0);
+
+  d.price = "¥" + buy.toLocaleString("en-US");
+  d.salePrice = "¥" + sale.toLocaleString("en-US");
+  d.margin = sale - buy;
+  d.stage = "stocked";
+  d.time = "刚刚";
+
+  closePrice();
+  appEl.classList.remove("overlay-inspector");
+  renderBoard();
+  renderTable();
+  updateStats();
+  saveManualDevices();
+  toast(`${d.name} 已入库 · 毛利 ¥${d.margin.toLocaleString("en-US")}`);
+});
+
+document.getElementById("price-close").addEventListener("click", closePrice);
+document.getElementById("price-cancel").addEventListener("click", closePrice);
+
+let sellingDevice = null;
+
+function updateSaleMargin() {
+  const sold = Number(document.getElementById("s-price").value || 0);
+  const buy = Number(String(sellingDevice?.price || "").replace(/[^\d]/g, "")) || 0;
+  const margin = sold - buy;
+  document.getElementById("s-margin").textContent = "¥" + margin.toLocaleString("en-US");
+  document.getElementById("s-rate").textContent =
+    sold > 0 ? Math.round((margin / sold) * 100) + "%" : "0%";
+}
+
+function openSale(d) {
+  sellingDevice = d;
+  document.getElementById("sale-sub").textContent = `${d.name} · ${d.serial}`;
+  document.getElementById("s-price").value =
+    Number(String(d.salePrice || d.price).replace(/[^\d]/g, "")) || "";
+  document.getElementById("s-date").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("s-buyer").value = "";
+  updateSaleMargin();
+
+  document.getElementById("scrim").classList.add("show");
+  document.getElementById("sale-modal").classList.add("show");
+  document.getElementById("s-price").focus();
+}
+
+function closeSale() {
+  document.getElementById("scrim").classList.remove("show");
+  document.getElementById("sale-modal").classList.remove("show");
+}
+
+document.getElementById("s-price").addEventListener("input", updateSaleMargin);
+
+document.getElementById("sale-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const d = sellingDevice;
+  if (!d) return;
+
+  const sold = Number(document.getElementById("s-price").value || 0);
+  const buy = Number(String(d.price).replace(/[^\d]/g, "")) || 0;
+
+  d.soldPrice = "¥" + sold.toLocaleString("en-US");
+  d.soldAt = document.getElementById("s-date").value;
+  d.buyer = document.getElementById("s-buyer").value.trim() || "—";
+  d.margin = sold - buy;
+  d.stage = "sold";
+  d.time = "刚刚";
+
+  closeSale();
+  appEl.classList.remove("overlay-inspector");
+  renderBoard();
+  renderTable();
+  updateStats();
+  saveManualDevices();
+  toast(`${d.name} 已售出 · 实际毛利 ¥${d.margin.toLocaleString("en-US")}`);
+});
+
+document.getElementById("sale-close").addEventListener("click", closeSale);
+document.getElementById("sale-cancel").addEventListener("click", closeSale);
+
+const gradeButtons = document.querySelectorAll("#f-grade button");
+gradeButtons.forEach(btn => {
+  btn.addEventListener("click", () => {
+    gradeButtons.forEach(x => x.setAttribute("aria-pressed", String(x === btn)));
+  });
+});
+
+document.getElementById("f-model").addEventListener("change", e => {
+  const ref = e.target.selectedOptions[0]?.dataset.ref;
+  if (ref) document.getElementById("f-price").value = ref;
+});
+
+document.getElementById("intake-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const modelSelect = document.getElementById("f-model");
+  const model = modelSelect.value;
+  if (!model) { modelSelect.focus(); return; }
+
+  const type = modelSelect.selectedOptions[0].dataset.type || "—";
+  const storage = document.getElementById("f-storage").value;
+  const serial = document.getElementById("f-serial").value.trim();
+  const source = document.getElementById("f-source").value;
+  const grade = document.querySelector('#f-grade button[aria-pressed="true"]').dataset.grade;
+  const seller = document.getElementById("f-seller").value.trim();
+  const priceNum = Number(document.getElementById("f-price").value || 0);
+
+  devices.unshift({
+    id: "m" + Date.now().toString(36),
+    name: model,
+    model: `${type} · ${storage} · ${grade}级`,
+    ios: "—",
+    serial: serial || "—",
+    imei: "—",
+    source,
+    time: "刚刚",
+    status: "unknown",
+    stage: "await",
+    price: "¥" + priceNum.toLocaleString("en-US"),
+    seller: seller || "—",
+    verdict: "未验证",
+    hint: "刚登记，尚未检测。",
+    account: null,
+  });
+
+  closeIntake();
+  document.getElementById("intake-form").reset();
+  gradeButtons.forEach((b, i) => b.setAttribute("aria-pressed", String(i === 0)));
+  renderBoard();
+  renderTable();
+  updateStats();
+  switchView("recycle");
+  saveManualDevices();
+  toast(`已登记 ${model} · ¥${priceNum.toLocaleString("en-US")}`);
+});
+
+document.getElementById("intake-close").addEventListener("click", closeIntake);
+document.getElementById("intake-cancel").addEventListener("click", closeIntake);
+document.getElementById("scrim").addEventListener("click", () => {
+  closeIntake();
+  closePrice();
+  closeSale();
+});
+
+const titles = {
+  devices: ["设备", "8 台在库 · 3 台异常"],
+  recycle: ["回收", "本周收机 8 台 · 4 台待处理"],
+  batch: ["批量", "勾选设备，顺序检测并自动分流"],
+  inspect: ["验机", "iPhone 15 · 第 3 步 / 共 5 步"],
+  report: ["报告", "已生成 28 份 · 最近 11-21 13:42"]
+};
+
+function switchView(name) {
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+  document.getElementById("view-" + name).classList.add("active");
+  document.querySelectorAll(".nav-item").forEach(b => {
+    if (b.dataset.view === name) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
+  const [t, s] = titles[name];
+  document.getElementById("view-title").textContent = t;
+  document.getElementById("view-sub").textContent =
+    name === "recycle"
+      ? `${devices.length} 台本周收机 · ${pendingCount()} 台待处理`
+      : s;
+  appEl.classList.remove("inspecting");
+  appEl.classList.toggle("no-inspector", name !== "devices");
+  appEl.classList.remove("overlay-inspector");
+  if (name === "recycle") renderBoard();
+  if (name === "batch") renderBatch();
+}
+
+document.querySelectorAll(".nav-item").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.view === "inspect") {
+      openInspect((current || devices[0]).id);
+      return;
+    }
+    switchView(btn.dataset.view);
+  });
+});
+
+document.getElementById("search").addEventListener("input", e => renderTable(e.target.value));
+
+document.getElementById("theme-btn").addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("fleetctl-theme", next); } catch (e) {}
+});
+
+try {
+  const saved = localStorage.getItem("fleetctl-theme");
+  if (saved) document.documentElement.dataset.theme = saved;
+} catch (e) {}
+
+document.addEventListener("keydown", e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    document.getElementById("search").focus();
+  }
+  if (e.key === "Escape") {
+    appEl.classList.remove("inspecting", "overlay-inspector");
+    if (document.getElementById("intake-modal").classList.contains("show")) closeIntake();
+    if (document.getElementById("price-modal").classList.contains("show")) closePrice();
+    if (document.getElementById("sale-modal").classList.contains("show")) closeSale();
+  }
+});
+
+document.getElementById("insp-action").addEventListener("click", () => {
+  if (!current) return;
+  const d = current;
+  const action = primaryAction(d);
+
+  if (action === "price") { openPrice(d); return; }
+  if (action === "sell") { openSale(d); return; }
+  if (action === "inspect") { openInspect(d.id); return; }
+  if (action === "report") {
+    appEl.classList.remove("overlay-inspector");
+    switchView("report");
+    return;
+  }
+
+  if (action === "stock") {
+    d.stage = "stocked";
+    toast(`${d.name} 已入库`);
+  } else {
+    d.stage = "returned";
+    toast(`${d.name} 已标记退货`);
+  }
+  appEl.classList.remove("overlay-inspector");
+  renderBoard();
+  renderTable();
+  updateStats();
+  saveManualDevices();
+});
+
+document.querySelectorAll(".insp-foot .btn")[0].addEventListener("click", () => {
+  switchView("report");
+  toast("已生成验机报告");
+});
+
+document.getElementById("export-btn").addEventListener("click", () => {
+  toast(`已导出 ${devices.length} 台设备的验机记录`);
+});
+document.getElementById("intake-open").addEventListener("click", openIntake);
+
+renderTable();
+renderBoard();
+updateStats();
+selectDevice(selectedId, false);
+switchView("recycle");
+loadManualDevices().then(loadRealDevices);
+
+// Pick up devices plugged in or removed while the window stays open.
+setInterval(() => { if (!document.hidden) refreshRealDevices(); }, 4000);
+window.addEventListener("focus", refreshRealDevices);
+
+document.getElementById("insp-close").addEventListener("click", () => {
+  appEl.classList.remove("inspecting", "overlay-inspector");
+  if (document.getElementById("view-recycle").classList.contains("active")) {
+    appEl.classList.add("no-inspector");
+  }
+});
+</script>
+</body>
+</html>
