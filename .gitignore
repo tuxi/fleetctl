@@ -55,6 +55,13 @@ build/
 *.wxs
 *.wixobj
 
+# Signing material — never commit certificates or private keys
+*.p12
+*.pfx
+*.cer
+*.mobileprovision
+*.asc
+
 # Generated reports
 test_report.*
 report.*

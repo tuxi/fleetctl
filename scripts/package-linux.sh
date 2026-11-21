@@ -1,11 +1,17 @@
 #!/bin/bash
 #
-# package-linux.sh -- Build a Linux .AppImage for fleetctl.
+# package-linux.sh -- Build and sign a Linux .AppImage for fleetctl.
 #
 # Usage: ./scripts/package-linux.sh [VERSION]
 #
 # Requires: PyInstaller binary at dist/fleetctl
 # Produces: dist/fleetctl-<VERSION>-x86_64.AppImage
+#
+# GPG signing is env-gated:
+#   LINUX_GPG_PRIVATE_KEY   base64 of an ASCII-armored private key
+#   LINUX_GPG_KEY_ID        key id / fingerprint to sign with (required with a key)
+#   LINUX_GPG_PASSPHRASE    key passphrase (optional)
+# Produces dist/<AppImage>.asc; with no key the AppImage is left unsigned.
 
 set -euo pipefail
 
@@ -72,3 +78,30 @@ echo "[*] Creating AppImage: $APPIMAGE"
 ARCH=x86_64 "$TOOL" "$APPDIR" "dist/$APPIMAGE"
 
 echo "[+] AppImage created: dist/$APPIMAGE"
+
+# --- Optional detached GPG signature -------------------------------- #
+if [ -n "${LINUX_GPG_PRIVATE_KEY:-}" ]; then
+    if [ -z "${LINUX_GPG_KEY_ID:-}" ]; then
+        echo "[!] LINUX_GPG_KEY_ID is required when LINUX_GPG_PRIVATE_KEY is set"
+        exit 1
+    fi
+
+    export GNUPGHOME
+    GNUPGHOME="$(mktemp -d)"
+    trap 'rm -rf "$GNUPGHOME"' EXIT
+
+    echo "[*] Importing GPG key..."
+    printf '%s' "$LINUX_GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
+
+    echo "[*] Signing AppImage..."
+    _gpg_args=(--batch --yes --armor --detach-sign --local-user "$LINUX_GPG_KEY_ID")
+    if [ -n "${LINUX_GPG_PASSPHRASE:-}" ]; then
+        _gpg_args+=(--pinentry-mode loopback --passphrase "$LINUX_GPG_PASSPHRASE")
+    fi
+    gpg "${_gpg_args[@]}" "dist/$APPIMAGE"
+    gpg --verify "dist/$APPIMAGE.asc" "dist/$APPIMAGE"
+
+    echo "[+] Signature: dist/$APPIMAGE.asc"
+else
+    echo "[i] No LINUX_GPG_PRIVATE_KEY set; leaving AppImage unsigned"
+fi

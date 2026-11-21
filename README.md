@@ -107,6 +107,8 @@ make package       # 自动检测平台打包
 make build         # Python sdist + wheel
 ```
 
+发布签名与公证（Developer ID / Authenticode / GPG）的配置见 [docs/release-signing.md](docs/release-signing.md)。
+
 ### CI/CD
 
 - `.github/workflows/ci.yml` - push/PR 触发：lint + type-check + test（3 OS × 2 Python）+ build
