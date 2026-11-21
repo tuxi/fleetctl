@@ -14,9 +14,11 @@ an empty list and the page keeps its mock data.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -25,7 +27,8 @@ import store
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", "4174"))
-MAX_BODY = 4 * 1024 * 1024
+MAX_BODY = 24 * 1024 * 1024
+MAX_ATTACHMENT = 12 * 1024 * 1024
 
 # Map the engine's verdict onto the prototype's four status colours.
 STATUS = {
@@ -169,6 +172,12 @@ def export_dir() -> str:
     if os.path.isdir(downloads):
         return downloads
     return os.path.expanduser("~/Documents")
+
+
+def attachments_dir() -> str:
+    path = os.path.join(store.data_dir(), "attachments")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def write_export(filename: str, content: str) -> str:
@@ -332,6 +341,42 @@ class Handler(SimpleHTTPRequestHandler):
                 )
             return
 
+        if parsed.path == "/api/attachments":
+            device_id = (parse_qs(parsed.query).get("device_id") or [""])[0]
+            try:
+                items = store.list_attachments(device_id)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+                return
+            for item in items:
+                item["url"] = f"/api/attachments/file/{item['id']}"
+            self._send_json({"ok": True, "attachments": items})
+            return
+
+        if parsed.path.startswith("/api/attachments/file/"):
+            try:
+                attachment_id = int(parsed.path.rsplit("/", 1)[1])
+            except ValueError:
+                self._send_json({"ok": False, "error": "invalid id"}, 400)
+                return
+            row = store.get_attachment(attachment_id)
+            if row is None:
+                self._send_json({"ok": False, "error": "not found"}, 404)
+                return
+            try:
+                with open(row["path"], "rb") as handle:
+                    body = handle.read()
+            except OSError:
+                self._send_json({"ok": False, "error": "file missing"}, 404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", row.get("mime") or "application/octet-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "private, max-age=300")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         super().do_GET()
 
     def do_PUT(self) -> None:  # noqa: N802 - stdlib naming
@@ -384,7 +429,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib naming
         parsed = urlparse(self.path)
-        if parsed.path not in ("/api/export", "/api/reports", "/api/receipts"):
+        if parsed.path not in ("/api/export", "/api/reports", "/api/receipts", "/api/attachments"):
             self._send_json({"ok": False, "error": "not found"}, 404)
             return
 
@@ -430,6 +475,45 @@ class Handler(SimpleHTTPRequestHandler):
             self._send_json({"ok": True, "id": receipt_id, "sha256": digest})
             return
 
+        if parsed.path == "/api/attachments":
+            device_id = str(payload.get("device_id") or "")
+            serial = str(payload.get("serial") or "")
+            filename = str(payload.get("filename") or "photo.jpg")
+            mime = str(payload.get("mime") or "application/octet-stream")
+            encoded = payload.get("data")
+            if not device_id or not isinstance(encoded, str) or not encoded:
+                self._send_json({"ok": False, "error": "device_id and data required"}, 400)
+                return
+            try:
+                raw = base64.b64decode(encoded, validate=True)
+            except Exception:
+                self._send_json({"ok": False, "error": "invalid base64 data"}, 400)
+                return
+            if len(raw) > MAX_ATTACHMENT:
+                self._send_json({"ok": False, "error": "attachment too large"}, 400)
+                return
+
+            safe = re.sub(r"[^A-Za-z0-9._-]", "_", filename)[:80] or "photo"
+            path = os.path.join(attachments_dir(), f"{uuid.uuid4().hex}-{safe}")
+            try:
+                with open(path, "wb") as handle:
+                    handle.write(raw)
+                attachment_id = store.add_attachment(
+                    device_id, serial, filename, mime, len(raw), path
+                )
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+                return
+
+            self._send_json(
+                {
+                    "ok": True,
+                    "id": attachment_id,
+                    "url": f"/api/attachments/file/{attachment_id}",
+                }
+            )
+            return
+
         content = payload.get("content") if isinstance(payload, dict) else None
         if not isinstance(content, str):
             self._send_json({"ok": False, "error": "content must be a string"}, 400)
@@ -443,6 +527,30 @@ class Handler(SimpleHTTPRequestHandler):
 
         self._send_json({"ok": True, "path": path})
 
+    def do_DELETE(self) -> None:  # noqa: N802 - stdlib naming
+        parsed = urlparse(self.path)
+        if not parsed.path.startswith("/api/attachments/"):
+            self._send_json({"ok": False, "error": "not found"}, 404)
+            return
+        try:
+            attachment_id = int(parsed.path.rsplit("/", 1)[1])
+        except ValueError:
+            self._send_json({"ok": False, "error": "invalid id"}, 400)
+            return
+        try:
+            row = store.delete_attachment(attachment_id)
+        except Exception as exc:
+            self._send_json({"ok": False, "error": str(exc)}, 500)
+            return
+        if row is None:
+            self._send_json({"ok": False, "error": "not found"}, 404)
+            return
+        try:
+            os.remove(row["path"])
+        except OSError:
+            pass
+        self._send_json({"ok": True})
+
     def do_OPTIONS(self) -> None:  # noqa: N802 - stdlib naming
         self.send_response(204)
         self._cors_headers()
@@ -453,7 +561,7 @@ class Handler(SimpleHTTPRequestHandler):
         # The Tauri shell serves the UI from tauri://localhost, so the bridge
         # must allow cross-origin reads.
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _send_json(self, payload: dict, status: int = 200) -> None:

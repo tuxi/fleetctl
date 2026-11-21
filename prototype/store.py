@@ -52,6 +52,18 @@ CREATE TABLE IF NOT EXISTS receipts (
 );
 CREATE INDEX IF NOT EXISTS idx_receipts_serial ON receipts(serial);
 
+CREATE TABLE IF NOT EXISTS attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id TEXT,
+    serial TEXT,
+    filename TEXT NOT NULL,
+    mime TEXT,
+    size INTEGER,
+    created_at TEXT,
+    path TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_device ON attachments(device_id);
+
 CREATE TABLE IF NOT EXISTS prices (
     product_type TEXT NOT NULL,
     capacity TEXT NOT NULL,
@@ -335,3 +347,44 @@ def replace_prices(rows: list[dict]) -> int:
             values,
         )
     return len(values)
+
+
+def add_attachment(
+    device_id: str, serial: str, filename: str, mime: str, size: int, path: str
+) -> int:
+    with session() as conn:
+        cursor = conn.execute(
+            "INSERT INTO attachments (device_id, serial, filename, mime, size, created_at, path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (device_id, serial, filename, mime, size, _now(), path),
+        )
+        return int(cursor.lastrowid or 0)
+
+
+def list_attachments(device_id: str) -> list[dict]:
+    with session() as conn:
+        rows = conn.execute(
+            "SELECT id, device_id, serial, filename, mime, size, created_at "
+            "FROM attachments WHERE device_id = ? ORDER BY id DESC",
+            (device_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_attachment(attachment_id: int) -> Optional[dict]:
+    with session() as conn:
+        row = conn.execute(
+            "SELECT id, device_id, serial, filename, mime, size, created_at, path "
+            "FROM attachments WHERE id = ?",
+            (attachment_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def delete_attachment(attachment_id: int) -> Optional[dict]:
+    row = get_attachment(attachment_id)
+    if not row:
+        return None
+    with session() as conn:
+        conn.execute("DELETE FROM attachments WHERE id = ?", (attachment_id,))
+    return row

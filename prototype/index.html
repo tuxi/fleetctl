@@ -434,6 +434,21 @@
     flex: 1; border-top: 1px solid var(--line-strong);
     padding-top: 6px; font-size: 12px; color: var(--ink-3);
   }
+
+  .attach-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .attach-item {
+    position: relative; aspect-ratio: 1;
+    border: 1px solid var(--line); border-radius: 6px;
+    overflow: hidden; background: var(--surface);
+  }
+  .attach-item img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: zoom-in; }
+  .attach-item .x {
+    position: absolute; top: 3px; right: 3px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: rgba(0, 0, 0, .55); color: #fff;
+    font-size: 12px; line-height: 1; display: grid; place-items: center;
+  }
+  .attach-empty { font-size: 12px; color: var(--ink-3); padding: 4px 0 8px; }
   .report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; }
   .report-grid div { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
   .report-grid .k { color: var(--ink-3); width: 76px; flex: 0 0 auto; }
@@ -1049,6 +1064,11 @@ d•••••@6•••••.com</div>
 
       <button class="btn" id="insp-delete" style="width:100%;margin-top:14px;display:none">删除这台设备</button>
 
+      <div class="section-title">照片与附件</div>
+      <div class="attach-grid" id="insp-attachments"></div>
+      <button class="btn" id="insp-attach-add" style="width:100%;margin-top:6px">添加照片</button>
+      <input type="file" id="attach-file" accept="image/*" multiple style="display:none">
+
       <div class="section-title">交易凭证</div>
       <div class="hw-empty" id="insp-receipt-summary">尚未生成</div>
       <button class="btn" id="insp-receipt-open" style="width:100%;margin-top:6px">生成收机单</button>
@@ -1274,6 +1294,17 @@ d•••••@6•••••.com</div>
       <button type="submit" class="btn btn-primary">生成收机单</button>
     </div>
   </form>
+</div>
+
+<div class="modal" id="lightbox" role="dialog" aria-modal="true" aria-labelledby="lightbox-title">
+  <div class="modal-head">
+    <h3 id="lightbox-title">照片</h3>
+    <span style="flex:1"></span>
+    <button class="icon-btn" id="lightbox-close" aria-label="关闭">×</button>
+  </div>
+  <div class="modal-body" style="display:block;padding:12px">
+    <img id="lightbox-img" alt="" style="max-width:100%;max-height:72vh;display:block;margin:0 auto">
+  </div>
 </div>
 
 <script>
@@ -1541,6 +1572,8 @@ function selectDevice(id, open = true) {
   document.getElementById("insp-receipt-summary").textContent = receiptSummary;
   document.getElementById("insp-receipt-open").textContent =
     d.receiptNo ? "重新生成收机单" : "生成收机单";
+
+  loadAttachments(d.id);
 
   const badge = document.getElementById("insp-badge");
   badge.className = "badge " + d.status;
@@ -3430,6 +3463,113 @@ document.getElementById("receipt-cancel").addEventListener("click", closeReceipt
 document.getElementById("receipt-back").addEventListener("click", () => switchView("recycle"));
 document.getElementById("receipt-print").addEventListener("click", () => window.print());
 
+let attachDeviceId = null;
+
+async function loadAttachments(deviceId) {
+  attachDeviceId = deviceId;
+  const grid = document.getElementById("insp-attachments");
+  if (!grid) return;
+  grid.innerHTML = `<div class="attach-empty">读取中…</div>`;
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/attachments?device_id=${encodeURIComponent(deviceId)}`,
+      { cache: "no-store" }
+    );
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "读取失败");
+    if (!data.attachments.length) {
+      grid.innerHTML = `<div class="attach-empty">还没有照片</div>`;
+      return;
+    }
+    grid.innerHTML = data.attachments
+      .map(
+        item => `<div class="attach-item">
+          <img src="${API_BASE}${item.url}" alt="${esc(item.filename)}"
+               data-full="${API_BASE}${item.url}" data-name="${esc(item.filename)}">
+          <button class="x" data-remove="${item.id}" aria-label="删除">×</button>
+        </div>`
+      )
+      .join("");
+    grid.querySelectorAll("img").forEach(img => {
+      img.addEventListener("click", () => openLightbox(img.dataset.full, img.dataset.name));
+    });
+    grid.querySelectorAll("[data-remove]").forEach(button => {
+      button.addEventListener("click", () => removeAttachment(Number(button.dataset.remove)));
+    });
+  } catch (err) {
+    grid.innerHTML = `<div class="attach-empty">读取失败</div>`;
+  }
+}
+
+async function uploadAttachments(files, device) {
+  let added = 0;
+  for (const file of files) {
+    if (file.size > 12 * 1024 * 1024) {
+      toast(`${file.name} 超过 12MB`);
+      continue;
+    }
+    const dataUrl = await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsDataURL(file);
+    });
+    const encoded = dataUrl.split(",")[1] || "";
+    try {
+      const res = await fetch(`${API_BASE}/api/attachments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          device_id: device.id,
+          serial: device.serial,
+          filename: file.name,
+          mime: file.type || "application/octet-stream",
+          data: encoded,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) added += 1;
+    } catch (err) {
+      // Skip this file; the rest still upload.
+    }
+  }
+  await loadAttachments(device.id);
+  toast(`已添加 ${added} 张照片`);
+}
+
+async function removeAttachment(id) {
+  try {
+    await fetch(`${API_BASE}/api/attachments/${id}`, { method: "DELETE" });
+  } catch (err) {
+    // Ignore; refresh below reflects the real state.
+  }
+  if (attachDeviceId) loadAttachments(attachDeviceId);
+}
+
+function openLightbox(url, name) {
+  document.getElementById("lightbox-title").textContent = name || "照片";
+  document.getElementById("lightbox-img").src = url;
+  document.getElementById("scrim").classList.add("show");
+  document.getElementById("lightbox").classList.add("show");
+}
+
+function closeLightbox() {
+  document.getElementById("scrim").classList.remove("show");
+  document.getElementById("lightbox").classList.remove("show");
+}
+
+document.getElementById("insp-attach-add").addEventListener("click", () => {
+  document.getElementById("attach-file").click();
+});
+
+document.getElementById("attach-file").addEventListener("change", async event => {
+  const files = [...(event.target.files || [])];
+  event.target.value = "";
+  if (!files.length || !current) return;
+  await uploadAttachments(files, current);
+});
+
+document.getElementById("lightbox-close").addEventListener("click", closeLightbox);
+
 const gradeButtons = document.querySelectorAll("#f-grade button");
 gradeButtons.forEach(btn => {
   btn.addEventListener("click", () => {
@@ -3519,6 +3659,7 @@ document.getElementById("scrim").addEventListener("click", () => {
   closeHardware();
   closeHistory();
   closeReceiptDialog();
+  closeLightbox();
 });
 
 const titles = {
@@ -3661,6 +3802,7 @@ document.addEventListener("keydown", e => {
     if (document.getElementById("hw-modal").classList.contains("show")) closeHardware();
     if (document.getElementById("history-modal").classList.contains("show")) closeHistory();
     if (document.getElementById("receipt-modal").classList.contains("show")) closeReceiptDialog();
+    if (document.getElementById("lightbox").classList.contains("show")) closeLightbox();
   }
 });
 
