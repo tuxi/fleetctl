@@ -866,7 +866,10 @@
           <button class="btn" id="price-add">添加机型</button>
           <span style="flex:1"></span>
           <span class="muted" id="price-hint">回收价按机型、容量、成色分档</span>
+          <button class="btn" id="price-import">导入 CSV</button>
+          <button class="btn" id="price-export">导出 CSV</button>
           <button class="btn btn-primary" id="price-save">保存全部</button>
+          <input type="file" id="price-file" accept=".csv,text/csv" style="display:none">
         </div>
         <div class="table-wrap">
           <table class="batch-table">
@@ -1859,7 +1862,7 @@ function renderPrices() {
   });
 }
 
-async function savePrices() {
+async function savePrices(quiet = false) {
   try {
     const res = await fetch(`${API_BASE}/api/prices`, {
       method: "PUT",
@@ -1868,7 +1871,7 @@ async function savePrices() {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "保存失败");
-    toast(`已保存 ${data.count} 条价格`);
+    if (!quiet) toast(`已保存 ${data.count} 条价格`);
     await loadPrices();
   } catch (err) {
     toast(`保存失败：${err.message || err}`);
@@ -1898,6 +1901,140 @@ document.getElementById("price-add").addEventListener("click", () => {
 });
 
 document.getElementById("price-save").addEventListener("click", savePrices);
+
+function csvCell(value) {
+  const text = String(value == null ? "" : value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function pricesToCsv() {
+  const lines = ["product_type,name,capacity,grade_a,grade_b,grade_c"];
+  priceRows.forEach(row => {
+    lines.push([
+      row.product_type, modelName(row.product_type), row.capacity,
+      row.grade_a ?? "", row.grade_b ?? "", row.grade_c ?? "",
+    ].map(csvCell).join(","));
+  });
+  return "﻿" + lines.join("\r\n");
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = "", quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i += 1; }
+        else quoted = false;
+      } else field += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ",") { row.push(field); field = ""; }
+    else if (ch === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else if (ch !== "\r") field += ch;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(cells => cells.some(cell => cell.trim() !== ""));
+}
+
+function toNumber(value) {
+  const text = String(value == null ? "" : value).trim();
+  if (!text) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
+async function importPrices(text) {
+  const rows = parseCsv(text);
+  if (!rows.length) { toast("文件里没有内容"); return; }
+
+  const header = rows[0].map(cell => cell.trim().toLowerCase());
+  const hasHeader = header.includes("product_type") || header.includes("capacity");
+  const column = key => (hasHeader ? header.indexOf(key) : -1);
+  const cols = hasHeader
+    ? {
+        type: column("product_type"), capacity: column("capacity"),
+        a: column("grade_a"), b: column("grade_b"), c: column("grade_c"),
+      }
+    : { type: 0, capacity: 1, a: 2, b: 3, c: 4 };
+
+  if (cols.type < 0 || cols.capacity < 0) {
+    toast("文件缺少 product_type / capacity 列");
+    return;
+  }
+
+  const body = hasHeader ? rows.slice(1) : rows;
+  const merged = new Map(priceRows.map(row => [`${row.product_type}|${row.capacity}`, row]));
+  let added = 0, updated = 0, skipped = 0;
+
+  body.forEach(cells => {
+    const productType = (cells[cols.type] || "").trim();
+    const capacity = (cells[cols.capacity] || "").trim();
+    if (!productType || !capacity) { skipped += 1; return; }
+    // A misaligned row (an unquoted comma in product_type, say) shifts every
+    // column; the capacity shape is the cheapest way to catch it.
+    if (!/^\d+(GB|TB)$/i.test(capacity)) { skipped += 1; return; }
+
+    const key = `${productType}|${capacity}`;
+    const values = {
+      product_type: productType,
+      capacity,
+      grade_a: cols.a >= 0 ? toNumber(cells[cols.a]) : null,
+      grade_b: cols.b >= 0 ? toNumber(cells[cols.b]) : null,
+      grade_c: cols.c >= 0 ? toNumber(cells[cols.c]) : null,
+    };
+
+    const existing = merged.get(key);
+    if (existing) { Object.assign(existing, values); updated += 1; }
+    else { merged.set(key, values); added += 1; }
+  });
+
+  priceRows = [...merged.values()];
+  renderPrices();
+  await savePrices(true);
+  toast(`导入完成：新增 ${added}，更新 ${updated}${skipped ? `，忽略 ${skipped}` : ""}`);
+}
+
+document.getElementById("price-export").addEventListener("click", async () => {
+  if (!priceRows.length) { toast("价格表是空的"); return; }
+  const filename = `fleetctl-prices-${new Date().toISOString().slice(0, 10)}.csv`;
+  const content = pricesToCsv();
+
+  try {
+    const res = await fetch(`${API_BASE}/api/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename, content }),
+    });
+    const data = await res.json();
+    if (data.ok) { toast(`已导出到 ${data.path}`); return; }
+  } catch (err) {
+    // fall through to a browser download
+  }
+
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  toast("价格表已导出");
+});
+
+document.getElementById("price-import").addEventListener("click", () => {
+  document.getElementById("price-file").click();
+});
+
+document.getElementById("price-file").addEventListener("change", async event => {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  try {
+    await importPrices(await file.text());
+  } catch (err) {
+    toast(`导入失败：${err.message || err}`);
+  }
+});
 
 async function loadManualDevices() {
   try {
