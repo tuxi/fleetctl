@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS attachments (
     filename TEXT NOT NULL,
     mime TEXT,
     size INTEGER,
+    sha256 TEXT,
     created_at TEXT,
     path TEXT NOT NULL
 );
@@ -116,6 +117,8 @@ def init() -> None:
     with session() as conn:
         conn.executescript(SCHEMA)
         _ensure_column(conn, "reports", "sha256", "TEXT")
+        _ensure_column(conn, "attachments", "sha256", "TEXT")
+        _backfill_attachment_hashes(conn)
     _migrate_legacy()
 
 
@@ -128,6 +131,19 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str)
 def _fingerprint(payload: dict) -> str:
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _backfill_attachment_hashes(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        "SELECT id, path FROM attachments WHERE sha256 IS NULL OR sha256 = ''"
+    ).fetchall()
+    for row in rows:
+        try:
+            with open(row["path"], "rb") as handle:
+                digest = hashlib.sha256(handle.read()).hexdigest()
+        except OSError:
+            continue
+        conn.execute("UPDATE attachments SET sha256 = ? WHERE id = ?", (digest, row["id"]))
 
 
 def _migrate_legacy() -> None:
@@ -350,13 +366,20 @@ def replace_prices(rows: list[dict]) -> int:
 
 
 def add_attachment(
-    device_id: str, serial: str, filename: str, mime: str, size: int, path: str
+    device_id: str,
+    serial: str,
+    filename: str,
+    mime: str,
+    size: int,
+    path: str,
+    sha256: str = "",
 ) -> int:
     with session() as conn:
         cursor = conn.execute(
-            "INSERT INTO attachments (device_id, serial, filename, mime, size, created_at, path) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (device_id, serial, filename, mime, size, _now(), path),
+            "INSERT INTO attachments "
+            "(device_id, serial, filename, mime, size, sha256, created_at, path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (device_id, serial, filename, mime, size, sha256, _now(), path),
         )
         return int(cursor.lastrowid or 0)
 
@@ -364,7 +387,7 @@ def add_attachment(
 def list_attachments(device_id: str) -> list[dict]:
     with session() as conn:
         rows = conn.execute(
-            "SELECT id, device_id, serial, filename, mime, size, created_at "
+            "SELECT id, device_id, serial, filename, mime, size, sha256, created_at "
             "FROM attachments WHERE device_id = ? ORDER BY id DESC",
             (device_id,),
         ).fetchall()
@@ -374,7 +397,7 @@ def list_attachments(device_id: str) -> list[dict]:
 def get_attachment(attachment_id: int) -> Optional[dict]:
     with session() as conn:
         row = conn.execute(
-            "SELECT id, device_id, serial, filename, mime, size, created_at, path "
+            "SELECT id, device_id, serial, filename, mime, size, sha256, created_at, path "
             "FROM attachments WHERE id = ?",
             (attachment_id,),
         ).fetchone()

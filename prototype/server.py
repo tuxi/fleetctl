@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import re
@@ -584,11 +585,12 @@ class Handler(SimpleHTTPRequestHandler):
 
             safe = re.sub(r"[^A-Za-z0-9._-]", "_", filename)[:80] or "photo"
             path = os.path.join(attachments_dir(), f"{uuid.uuid4().hex}-{safe}")
+            digest = hashlib.sha256(raw).hexdigest()
             try:
                 with open(path, "wb") as handle:
                     handle.write(raw)
                 attachment_id = store.add_attachment(
-                    device_id, serial, filename, mime, len(raw), path
+                    device_id, serial, filename, mime, len(raw), path, digest
                 )
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, 500)
@@ -598,6 +600,7 @@ class Handler(SimpleHTTPRequestHandler):
                 {
                     "ok": True,
                     "id": attachment_id,
+                    "sha256": digest,
                     "url": f"/api/attachments/file/{attachment_id}",
                 }
             )

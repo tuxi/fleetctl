@@ -458,6 +458,11 @@
   .diag-row .name { width: 96px; flex: 0 0 auto; font-size: 12.5px; color: var(--ink); }
   .diag-row .detail { font-size: 12px; color: var(--ink-2); line-height: 1.6; }
   #diag-hints ul { margin: 6px 0 0 18px; padding: 0; font-size: 12px; color: var(--ink-2); line-height: 1.8; }
+
+  .report-photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 8px; }
+  .report-photo { margin: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .report-photo img { width: 100%; height: 110px; object-fit: cover; display: block; cursor: zoom-in; }
+  .report-photo figcaption { font-size: 10.5px; color: var(--ink-3); padding: 4px 6px; line-height: 1.5; }
   .report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; }
   .report-grid div { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
   .report-grid .k { color: var(--ink-3); width: 76px; flex: 0 0 auto; }
@@ -717,6 +722,7 @@
     #view-report.active, #view-receipt.active { display: block !important; }
     .report-wrap { padding: 0; }
     .sheet { border: 0; max-width: none; padding: 0; }
+    .report-photo img { height: auto; max-height: 55mm; }
     body { background: #fff; }
   }
 
@@ -1600,7 +1606,7 @@ function selectDevice(id, open = true) {
   document.getElementById("insp-receipt-open").textContent =
     d.receiptNo ? "重新生成收机单" : "生成收机单";
 
-  loadAttachments(d.id);
+  loadAttachments(d);
 
   const badge = document.getElementById("insp-badge");
   badge.className = "badge " + d.status;
@@ -3097,6 +3103,13 @@ function reportData(d) {
         }
       : null,
     hardware: d.hardware || null,
+    attachments: (d.attachments || []).map(item => ({
+      id: item.id,
+      filename: item.filename,
+      mime: item.mime,
+      size: item.size,
+      sha256: item.sha256 || null,
+    })),
     trade: {
       price: d.price || null,
       sale_price: d.salePrice || null,
@@ -3198,6 +3211,21 @@ function renderReport(d, options = {}) {
       <div class="report-grid" style="margin-top:8px">${checks}</div>`);
   }
 
+  const photos = d.attachments || [];
+  if (photos.length) {
+    parts.push(`<h4>外观照片</h4><div class="report-photos">${photos
+      .map(photo => {
+        const src = `${API_BASE}${photo.url || `/api/attachments/file/${photo.id}`}`;
+        return `<figure class="report-photo">
+          <img src="${src}" alt="${esc(photo.filename)}" data-full="${src}" data-name="${esc(photo.filename)}">
+          <figcaption>${esc(photo.filename)}${
+            photo.sha256 ? `<br><span class="mono">${esc(photo.sha256.slice(0, 16))}…</span>` : ""
+          }</figcaption>
+        </figure>`;
+      })
+      .join("")}</div>`);
+  }
+
   const trade = [];
   if (d.price && d.price !== "—") trade.push(`<tr><th>回收价</th><td class="mono">${esc(d.price)}</td></tr>`);
   if (d.salePrice) trade.push(`<tr><th>预计出货价</th><td class="mono">${esc(d.salePrice)}</td></tr>`);
@@ -3222,6 +3250,9 @@ function renderReport(d, options = {}) {
   </div>`);
 
   sheet.innerHTML = parts.join("");
+  sheet.querySelectorAll("img[data-full]").forEach(img => {
+    img.addEventListener("click", () => openLightbox(img.dataset.full, img.dataset.name));
+  });
 }
 
 document.getElementById("report-json").addEventListener("click", async () => {
@@ -3490,20 +3521,23 @@ document.getElementById("receipt-cancel").addEventListener("click", closeReceipt
 document.getElementById("receipt-back").addEventListener("click", () => switchView("recycle"));
 document.getElementById("receipt-print").addEventListener("click", () => window.print());
 
+let attachDevice = null;
 let attachDeviceId = null;
 
-async function loadAttachments(deviceId) {
-  attachDeviceId = deviceId;
+async function loadAttachments(device) {
+  attachDevice = device;
+  attachDeviceId = device.id;
   const grid = document.getElementById("insp-attachments");
   if (!grid) return;
   grid.innerHTML = `<div class="attach-empty">读取中…</div>`;
   try {
     const res = await fetch(
-      `${API_BASE}/api/attachments?device_id=${encodeURIComponent(deviceId)}`,
+      `${API_BASE}/api/attachments?device_id=${encodeURIComponent(device.id)}`,
       { cache: "no-store" }
     );
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "读取失败");
+    device.attachments = data.attachments || [];
     if (!data.attachments.length) {
       grid.innerHTML = `<div class="attach-empty">还没有照片</div>`;
       return;
@@ -3559,7 +3593,7 @@ async function uploadAttachments(files, device) {
       // Skip this file; the rest still upload.
     }
   }
-  await loadAttachments(device.id);
+  await loadAttachments(attachDevice || device);
   toast(`已添加 ${added} 张照片`);
 }
 
@@ -3569,7 +3603,10 @@ async function removeAttachment(id) {
   } catch (err) {
     // Ignore; refresh below reflects the real state.
   }
-  if (attachDeviceId) loadAttachments(attachDeviceId);
+  if (attachDeviceId) {
+    const target = devices.find(item => item.id === attachDeviceId);
+    if (target) loadAttachments(target);
+  }
 }
 
 function openLightbox(url, name) {
