@@ -288,7 +288,11 @@ class DeviceFingerprint:
                 total += 1
                 if getattr(self, attr) == getattr(other, attr):
                     matches += 1
-        return total == 0 or (matches / total) >= threshold
+        if total == 0:
+            # Nothing comparable: refuse rather than treat two blank
+            # fingerprints as the same device.
+            return False
+        return (matches / total) >= threshold
 
 
 class LicenseError(Exception):

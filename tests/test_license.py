@@ -74,6 +74,30 @@ class TestDeviceFingerprint:
         fp = DeviceFingerprint(udid="udid-1", serial_number="SN1")
         assert DeviceFingerprint.from_dict(fp.to_dict()).udid == "udid-1"
 
+    def test_blank_fingerprints_do_not_match(self):
+        assert DeviceFingerprint().matches(DeviceFingerprint()) is False
+
+    def test_different_udids_without_hardware_do_not_match(self):
+        assert DeviceFingerprint(udid="u1").matches(DeviceFingerprint(udid="u2")) is False
+
+    def test_matching_hardware_matches(self):
+        a = DeviceFingerprint(
+            product_type="iPhone16,1", hardware_model="D83AP", cpu_architecture="arm64e"
+        )
+        b = DeviceFingerprint(
+            product_type="iPhone16,1", hardware_model="D83AP", cpu_architecture="arm64e"
+        )
+        assert a.matches(b) is True
+
+    def test_differing_hardware_does_not_match(self):
+        a = DeviceFingerprint(
+            product_type="iPhone15,2", hardware_model="D63AP", cpu_architecture="arm64e"
+        )
+        b = DeviceFingerprint(
+            product_type="iPhone16,1", hardware_model="D83AP", cpu_architecture="arm64e"
+        )
+        assert a.matches(b) is False
+
 
 class TestLicense:
     def test_trial_is_valid(self):
@@ -124,6 +148,13 @@ class TestDeviceBinding:
         license_.max_device_bindings = 1
         assert license_.bind_device(DeviceFingerprint(udid="a")) is True
         assert license_.bind_device(DeviceFingerprint(udid="b")) is False
+
+    def test_distinct_udids_bind_separately(self):
+        license_ = License.create_trial("ACME")
+        license_.max_device_bindings = 5
+        license_.bind_device(DeviceFingerprint(udid="a"))
+        license_.bind_device(DeviceFingerprint(udid="b"))
+        assert len(license_.bound_devices) == 2
 
 
 class TestErrors:
