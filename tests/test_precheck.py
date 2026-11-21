@@ -48,6 +48,10 @@ def _fail(status="ERROR", details="boom"):
     return {"passed": False, "status": status, "details": details}
 
 
+async def _activation_ok(udid):
+    return _ok("CLEAN", "activation server accepted the request")
+
+
 async def _step1_ok(udid):
     return _ok()
 
@@ -69,18 +73,20 @@ class TestRunPrecheckSteps:
         result = await run_precheck_steps(
             "udid-1", FakeCollector(ready=True),
             device_info={"device_name": "iPhone", "product_type": "iPhone13,3", "product_version": "17.0"},
-            check_step1=_step1_ok, check_step3=_step3_ok,
+            check_activation=_activation_ok, check_step1=_step1_ok, check_step3=_step3_ok,
         )
         assert result["overall_passed"] is True
         assert result["udid"] == "udid-1"
         assert result["device_name"] == "iPhone"
-        assert set(result["steps"]) == {"erase_available", "setup_assistant_offline", "usb_pairing"}
+        assert set(result["steps"]) == {
+            "activation_lock", "erase_available", "setup_assistant_offline", "usb_pairing",
+        }
         assert result["steps"]["setup_assistant_offline"]["passed"] is True
 
     async def test_step2_failure_marks_overall_failed(self):
         result = await run_precheck_steps(
             "udid-1", FakeCollector(ready=False, reason="already_activated"),
-            check_step1=_step1_ok, check_step3=_step3_ok,
+            check_activation=_activation_ok, check_step1=_step1_ok, check_step3=_step3_ok,
         )
         assert result["overall_passed"] is False
         assert result["steps"]["setup_assistant_offline"]["status"] == "already_activated"
@@ -88,18 +94,31 @@ class TestRunPrecheckSteps:
     async def test_step1_failure_marks_overall_failed(self):
         result = await run_precheck_steps(
             "udid-1", FakeCollector(ready=True),
-            check_step1=_step1_fail, check_step3=_step3_ok,
+            check_activation=_activation_ok, check_step1=_step1_fail, check_step3=_step3_ok,
         )
         assert result["overall_passed"] is False
+
+    async def test_activation_lock_failure_marks_overall_failed(self):
+        async def locked(udid):
+            return _fail("ICLOUD_LOCK", {"masked_account": "d*****@6*****.com"})
+
+        result = await run_precheck_steps(
+            "udid-1", FakeCollector(ready=True),
+            check_activation=locked, check_step1=_step1_ok, check_step3=_step3_ok,
+        )
+        assert result["overall_passed"] is False
+        assert result["steps"]["activation_lock"]["status"] == "ICLOUD_LOCK"
 
     async def test_on_step_callback_order(self):
         seen = []
         await run_precheck_steps(
             "udid-1", FakeCollector(ready=True),
-            check_step1=_step1_ok, check_step3=_step3_ok,
+            check_activation=_activation_ok, check_step1=_step1_ok, check_step3=_step3_ok,
             on_step=lambda name, res: seen.append(name),
         )
-        assert seen == ["erase_available", "setup_assistant_offline", "usb_pairing"]
+        assert seen == [
+            "activation_lock", "erase_available", "setup_assistant_offline", "usb_pairing",
+        ]
 
 
 # ---------------------------------------------------------------- #
@@ -111,7 +130,7 @@ class TestFormatText:
         result = await run_precheck_steps(
             "udid-xyz", FakeCollector(ready=False, reason="already_activated"),
             device_info={"device_name": "iPhone"},
-            check_step1=_step1_ok, check_step3=_step3_ok,
+            check_activation=_activation_ok, check_step1=_step1_ok, check_step3=_step3_ok,
         )
         text = format_precheck_text(result)
         assert "PRE-CHECK SUMMARY: FAILED" in text
@@ -129,6 +148,7 @@ class TestReport:
             "udid": "udid-1", "device_name": "iPhone", "product_type": "iPhone13,3",
             "product_version": "17.0", "overall_passed": True, "checked_at": "2026-01-01T00:00:00Z",
             "steps": {
+                "activation_lock": _ok("CLEAN"),
                 "erase_available": _ok(),
                 "setup_assistant_offline": _ok(),
                 "usb_pairing": _ok("PAIRED"),
@@ -230,18 +250,26 @@ def _patch_env(monkeypatch, devices, precheck_result):
     async def fake_run(udid, collector, device_info=None, **kwargs):
         cb = kwargs.get("on_step")
         if cb:
-            for name in ("erase_available", "setup_assistant_offline", "usb_pairing"):
+            for name in (
+                "activation_lock", "erase_available",
+                "setup_assistant_offline", "usb_pairing",
+            ):
                 cb(name, precheck_result["steps"][name])
         return precheck_result
 
     monkeypatch.setattr(main, "run_precheck_steps", fake_run)
 
 
-def _result(overall, s1, s2, s3, udid="00008101-AAAA"):
+def _result(overall, s1, s2, s3, udid="00008101-AAAA", s0=None):
     return {
         "udid": udid, "device_name": "iPhone", "product_type": "iPhone13,3",
         "product_version": "17.0", "overall_passed": overall, "checked_at": "2026-01-01T00:00:00Z",
-        "steps": {"erase_available": s1, "setup_assistant_offline": s2, "usb_pairing": s3},
+        "steps": {
+            "activation_lock": s0 if s0 is not None else _ok("CLEAN"),
+            "erase_available": s1,
+            "setup_assistant_offline": s2,
+            "usb_pairing": s3,
+        },
     }
 
 

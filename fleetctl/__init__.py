@@ -59,6 +59,18 @@ from .config_writer import (
     ConfigurationSource,
 )
 
+from .activation_lock import (
+    ActivationProbe,
+    LockVerdict,
+    ACTIVATION_SCHEMA_VERSION,
+    VerifyResult,
+    VERIFY_SCHEMA_VERSION,
+    classify_activation_response,
+    format_verify_text,
+    probe_activation_lock,
+    verify_device,
+)
+
 from .wipe_manager import (
     WipeManager,
     WipeOptions,
@@ -150,6 +162,17 @@ __all__ = [
     "create_skip_setup_config",
     "ConfigurationSource",
     
+    # Activation lock probe
+    "ActivationProbe",
+    "LockVerdict",
+    "ACTIVATION_SCHEMA_VERSION",
+    "VerifyResult",
+    "VERIFY_SCHEMA_VERSION",
+    "classify_activation_response",
+    "format_verify_text",
+    "probe_activation_lock",
+    "verify_device",
+
     # Wipe manager
     "WipeManager",
     "WipeOptions",

@@ -13,6 +13,7 @@
 ## 核心特性
 
 - ✅ **合规优先** - 仅用 Apple 公开 API（pymobiledevice3），无漏洞利用 / 无私有 entitlement / 无越狱依赖
+- ✅ **激活锁判定** - 向 Apple 激活服务器发起标准请求，区分干净机 / iCloud 激活锁 / MDM 监管锁
 - ✅ **跨平台** - macOS / Windows / Linux
 - ✅ **批量操作** - 并发/串行批量检测、擦除、预检；进度条 + 断点续传 + 自适应并发
 - ✅ **专业报告** - HTML（响应式/暗色模式）/ PDF（水印/目录/页码）/ JSON（Schema 版本化）/ CSV
@@ -46,8 +47,11 @@ fleetctl list
 # 设备信息检测（无需配对/解锁/激活）
 fleetctl detect 00008101-000C6598363A001E
 
-# 三步手工门预检
+# 四步手工门预检（含激活锁判定）
 fleetctl precheck --udid 00008101-000C6598363A001E
+
+# 擦除后激活锁复验（等设备回到 Setup Assistant 再判定）
+fleetctl verify --wait 300
 
 # 批量预检（进度条 + 断点续传）
 fleetctl bulk precheck --progress --resume
@@ -67,7 +71,8 @@ fleetctl report --input devices.json --format pdf --output report.pdf
 |------|------|
 | `detect <UDID>` | 设备信息检测（无需授权） |
 | `list` | 列出连接设备 |
-| `precheck` | 三步手工门验证 |
+| `precheck` | 四步手工门验证（激活锁判定 / 擦除 / Setup Assistant / USB） |
+| `verify` | 擦除后激活锁复验（0 干净 / 1 锁定 / 2 未验证） |
 | `wipe <UDID> --confirm` | 合规擦除（NIST 800-88） |
 | `report` | 报告生成（json/csv/html/pdf） |
 | `filter` | 设备过滤 |

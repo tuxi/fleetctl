@@ -7,11 +7,17 @@ device is ready for the offline Setup Assistant gateway described in spec/11
 or Remote Management bypass.
 
 Steps:
-    1. Erase availability  -- can "Erase All Content and Settings" be used?
-    2. Offline Setup Assistant -- is the device at/near the Wi-Fi-before state?
-    3. USB pairing -- is the lockdown/pairing channel healthy?
+    1. Activation lock     -- does Apple's activation server let it activate?
+    2. Erase availability  -- can "Erase All Content and Settings" be used?
+    3. Offline Setup Assistant -- is the device at/near the Wi-Fi-before state?
+    4. USB pairing -- is the lockdown/pairing channel healthy?
 
-All checks use only public pymobiledevice3 APIs (lockdown / mobileconfig).
+Step 1 is the gate. ``ActivationState`` alone cannot tell a clean device from
+one locked to someone else's Apple account, so the verdict comes from an
+activation request to Apple rather than from local fields.
+
+All checks use only public pymobiledevice3 APIs (lockdown / mobileconfig /
+mobile_activation).
 """
 
 from __future__ import annotations
@@ -21,7 +27,9 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-PRECHECK_SCHEMA_VERSION = "1.0"
+from .activation_lock import LockVerdict, probe_activation_lock
+
+PRECHECK_SCHEMA_VERSION = "1.1"
 
 # Guidance shown after Step 1 when the device must be erased by hand.
 # The tool never performs the erase itself: erasing is a destructive, user-owned
@@ -42,8 +50,42 @@ WAIT_ACK_PROMPT = (
 )
 
 
+async def check_activation_lock_step(udid: str, probe: Any = None) -> Dict[str, Any]:
+    """Step 1: Ask Apple's activation server whether this device may activate.
+
+    This is the only step that can tell a clean device from one locked to
+    another Apple account. Local fields cannot: ``ActivationState`` is
+    ``Unactivated`` on both, and the NVRAM ``fm-*`` flags go stale after an
+    erase.
+
+    Verdict mapping:
+
+    ``CLEAN``         server accepted the activation request
+    ``ICLOUD_LOCK``   activation lock -- stop, do not buy or erase
+    ``MDM_LOCK``      remote management -- stop
+    ``PENDING_ERASE`` already activated; judge again after erase
+    ``UNDETERMINED``  network/protocol failure -- never treat as clean
+    """
+    probe_fn = probe or probe_activation_lock
+    try:
+        result = await probe_fn(udid)
+    except Exception as exc:
+        return {
+            "passed": False,
+            "status": LockVerdict.UNDETERMINED.value.upper(),
+            "details": {"error": f"Activation probe failed: {exc}"},
+        }
+
+    details = {k: v for k, v in result.to_dict().items() if v is not None}
+    return {
+        "passed": result.passed,
+        "status": result.verdict.value.upper(),
+        "details": details,
+    }
+
+
 async def check_erase_availability(udid: str) -> Dict[str, Any]:
-    """Step 1: Check whether 'Erase All Content and Settings' is available.
+    """Step 2: Check whether 'Erase All Content and Settings' is available.
 
     Read-only. Inspects activation state, supervision (via cloud configuration)
     and passcode protection.
@@ -103,7 +145,7 @@ async def check_erase_availability(udid: str) -> Dict[str, Any]:
 
 
 async def check_usb_pairing(udid: str) -> Dict[str, Any]:
-    """Step 3: Check that the USB pairing/lockdown channel works."""
+    """Step 4: Check that the USB pairing/lockdown channel works."""
     try:
         from pymobiledevice3.lockdown import create_using_usbmux
 
@@ -137,26 +179,33 @@ async def run_precheck_steps(
     udid: str,
     collector: Any,
     device_info: Optional[Dict[str, Any]] = None,
+    check_activation: Any = None,
     check_step1: Any = None,
     check_step3: Any = None,
     on_step: Any = None,
 ) -> Dict[str, Any]:
-    """Run the three read-only pre-check steps for one device.
+    """Run the four read-only pre-check steps for one device.
 
     Args:
         udid: Device UDID.
         collector: A ``DeviceInfoCollector`` providing
             ``check_setup_assistant_offline_state``.
         device_info: Optional enumerate() record for name/model/version.
-        check_step1 / check_step3: Overridable step functions (for testing).
+        check_activation / check_step1 / check_step3: Overridable step
+            functions (for testing).
         on_step: Optional callback ``(step_name, step_result)`` invoked after
             each step completes (for progress reporting).
 
     Returns:
         Structured result dict with ``steps`` and ``overall_passed``.
     """
+    activation_fn = check_activation or check_activation_lock_step
     step1_fn = check_step1 or check_erase_availability
     step3_fn = check_step3 or check_usb_pairing
+
+    activation = await activation_fn(udid)
+    if on_step:
+        on_step("activation_lock", activation)
 
     step1 = await step1_fn(udid)
     if on_step:
@@ -176,7 +225,7 @@ async def run_precheck_steps(
         on_step("usb_pairing", step3)
 
     device_info = device_info or {}
-    overall = all(s["passed"] for s in (step1, step2, step3))
+    overall = all(s["passed"] for s in (activation, step1, step2, step3))
 
     return {
         "udid": udid,
@@ -184,6 +233,7 @@ async def run_precheck_steps(
         "product_type": device_info.get("product_type"),
         "product_version": device_info.get("product_version"),
         "steps": {
+            "activation_lock": activation,
             "erase_available": step1,
             "setup_assistant_offline": step2,
             "usb_pairing": step3,
@@ -195,9 +245,10 @@ async def run_precheck_steps(
 
 def step_label(name: str) -> str:
     return {
-        "erase_available": "Step 1 (Erase Available)",
-        "setup_assistant_offline": "Step 2 (Setup Assistant)",
-        "usb_pairing": "Step 3 (USB Pairing)",
+        "activation_lock": "Step 1 (Activation Lock)",
+        "erase_available": "Step 2 (Erase Available)",
+        "setup_assistant_offline": "Step 3 (Setup Assistant)",
+        "usb_pairing": "Step 4 (USB Pairing)",
     }.get(name, name)
 
 
@@ -216,10 +267,15 @@ def format_precheck_text(result: Dict[str, Any]) -> str:
     lines.append(f"{'=' * 60}")
 
     steps = result.get("steps", {})
-    ordered = ["erase_available", "setup_assistant_offline", "usb_pairing"]
+    ordered = [
+        "activation_lock",
+        "erase_available",
+        "setup_assistant_offline",
+        "usb_pairing",
+    ]
     for i, key in enumerate(ordered, start=1):
         s = steps.get(key, {})
-        lines.append(f"\n[Step {i}/3] {key.replace('_', ' ')}")
+        lines.append(f"\n[Step {i}/4] {key.replace('_', ' ')}")
         lines.append(f"  Result: {s.get('status', 'unknown')}")
         details = s.get("details")
         if isinstance(details, dict):
@@ -293,7 +349,12 @@ def _generate_precheck_html(
 ) -> str:
     ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     counts = _summary_counts(prechecks)
-    ordered = ["erase_available", "setup_assistant_offline", "usb_pairing"]
+    ordered = [
+        "activation_lock",
+        "erase_available",
+        "setup_assistant_offline",
+        "usb_pairing",
+    ]
 
     rows = []
     for p in prechecks:
@@ -373,11 +434,12 @@ def _generate_precheck_html(
         <thead>
           <tr>
             <th>Device</th><th>Model</th><th>iOS</th>
-            <th>Step 1 Erase</th><th>Step 2 Setup</th><th>Step 3 USB</th><th>Overall</th>
+            <th>Step 1 Activation</th><th>Step 2 Erase</th><th>Step 3 Setup</th>
+            <th>Step 4 USB</th><th>Overall</th>
           </tr>
         </thead>
         <tbody>
-          {''.join(rows) if rows else '<tr><td colspan="7">No devices</td></tr>'}
+          {''.join(rows) if rows else '<tr><td colspan="8">No devices</td></tr>'}
         </tbody>
       </table>
     </div>

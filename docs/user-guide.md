@@ -70,7 +70,7 @@ fleetctl detect 00008101-000C6598363A001E
 fleetctl detect 00008101-000C6598363A001E --json
 ```
 
-### 3.3 三步预检（precheck）
+### 3.3 四步预检（precheck）
 
 ```bash
 # 单台设备预检
@@ -98,7 +98,7 @@ fleetctl detect <UDID> [--json]
 fleetctl list [--json]
 ```
 
-### 4.3 precheck - 三步手工门验证
+### 4.3 precheck - 四步手工门验证
 
 ```bash
 # 只读预检（单台 / 全部）
@@ -108,24 +108,68 @@ fleetctl precheck [--udid UDID] [--json]
 fleetctl precheck --report audit.json --report-format json --company "ACME"
 fleetctl precheck --report audit.html --report-format html --title "巡检报告"
 
-# 交互式引导：若 Step 2 未通过，打印擦除指引并等待进入 Setup Assistant
+# 交互式引导：若 Step 3 未通过，打印擦除指引并等待进入 Setup Assistant
 fleetctl precheck --confirm --wait 300
 ```
 
-**三步检查**（只读，绝不修改设备）：
-1. 擦除可用性 - 检查 ActivationState、锁屏密码、监管状态
-2. 离线 Setup Assistant - 检查能否离线进入 Wi-Fi 选择前界面
-3. USB 配对 - 验证 USB 连接和配对信任关系
+**四步检查**（只读，绝不修改设备）：
+1. 激活锁判定 - 向 Apple 激活服务器发起标准激活请求，由服务器裁定
+2. 擦除可用性 - 检查 ActivationState、锁屏密码、监管状态
+3. 离线 Setup Assistant - 检查能否离线进入 Wi-Fi 选择前界面
+4. USB 配对 - 验证 USB 连接和配对信任关系
+
+**Step 1 的判定结果**：
+
+| 结果 | 含义 | 后续 |
+|------|------|------|
+| `CLEAN` | 服务器接受激活请求，无锁 | 可继续后续步骤 |
+| `ICLOUD_LOCK` | 激活锁，绑定他人 Apple 账户（报告中含打码账户） | 停止，不要擦除 |
+| `MDM_LOCK` | 远程管理 / 监管机（报告中含机构名） | 停止，不要擦除 |
+| `PENDING_ERASE` | 设备已激活，未擦除前无法判定 | 擦除后重新预检 |
+| `UNDETERMINED` | 网络或协议失败 | 视为未验证，重试，**不得当作干净机** |
+
+> 只靠 `ActivationState` 无法区分干净机与锁机——两者都是 `Unactivated`。也必须以服务器结论为准，本地 `fm-*` 标记在抹机后会过期。
 
 **选项**：
-- `--confirm` - 启用交互式引导流程（Step 2 未通过时打印手动擦除指引，并提示输入 `READY`）
+- `--confirm` - 启用交互式引导流程（Step 3 未通过时打印手动擦除指引，并提示输入 `READY`）
 - `--wait SECONDS` - 配合 `--confirm`：轮询等待设备进入离线 Setup Assistant 状态，最长 SECONDS 秒
 - `--report PATH` / `--report-format {json,html}` - 输出审计报告
 - `--title` / `--company` - 报告标题与公司名
 
 > `fleetctl` **不执行擦除**。抹机是设备上的手动操作（设置 → 通用 → 传输或还原 iPhone → 抹掉所有内容和设置）；本命令只做只读判定与引导。
 
-### 4.4 wipe - 合规擦除
+### 4.4 verify - 擦除后激活锁复验
+
+```bash
+# 擦除后立刻复验（设备重启回 Setup Assistant 期间自动等待）
+fleetctl verify --wait 300
+
+# 只探测一次
+fleetctl verify --udid 00008101-000C6598363A001E
+
+# 输出 JSON 复验记录，可作为交付凭证留档
+fleetctl verify --wait 300 --report verify.json --json
+```
+
+**为什么需要这一步**：卖家可能注销了 Apple ID 却没有关闭"查找我的 iPhone"。这种设备能开机、能登你的 ID，`precheck` 第 1 步看起来也正常，但**一旦抹掉，激活锁立刻回来**。只有抹机后重新向 Apple 求证，才能把它和真正的干净机区分开。
+
+**退出码**：
+
+| 码 | 含义 | 处置 |
+|----|------|------|
+| `0` | `CLEAN`，服务器接受激活 | 可以交付 / 确认收货 |
+| `1` | `ICLOUD_LOCK` 或 `MDM_LOCK` | 停止交易，不要再次擦除 |
+| `2` | `PENDING_ERASE`（还没擦）或 `UNDETERMINED`（没问到） | 擦除后重试，或换稳定网络重试 |
+
+> 退出码 2 表示**没有结论**，不是"没问题"。脚本里不要把 2 当作通过。
+
+**选项**：
+- `--wait SECONDS` - 轮询等待设备回到可判定状态（擦除后设备会重启、短暂断开）
+- `--interval SECONDS` - 轮询间隔，默认 5 秒
+- `--udid` - 指定设备；只连一台时可省略
+- `--json` / `--report PATH` - 输出 JSON 复验记录，可作为交付凭证留档
+
+### 4.5 wipe - 合规擦除
 
 ```bash
 # 单台擦除（需交互式确认）
@@ -149,7 +193,7 @@ fleetctl bulk wipe --progress --resume --confirm --certificate-dir ./certs --cer
 - 证书含：证书 ID、设备信息、擦除方法、时间戳、结果、验证者、SHA-256 完整性哈希
 - PDF 版为正式排版（标题、分区表格、结果横幅、完整性哈希、页脚声明）
 
-### 4.5 report - 专业报告生成
+### 4.6 report - 专业报告生成
 
 ```bash
 # 从设备采集并生成
@@ -161,13 +205,13 @@ fleetctl report --input devices.json --format pdf --output report.pdf --title "�
 
 **支持格式**：HTML（响应式、暗色模式、可展开详情）、PDF（水印、目录、页码、证书布局）、JSON（Schema 版本化）、CSV
 
-### 4.6 filter - 设备过滤
+### 4.7 filter - 设备过滤
 
 ```bash
 fleetctl filter --input devices.json --chip A13 --supervised --min-free-gb 10
 ```
 
-### 4.7 bulk - 批量操作
+### 4.8 bulk - 批量操作
 
 ```bash
 # 批量检测
@@ -186,19 +230,19 @@ fleetctl bulk wipe --progress --resume --confirm
 - `--resume` - 从 checkpoint 断点续传
 - `--json` - JSON 输出
 
-### 4.8 parse-backup - 备份解析
+### 4.9 parse-backup - 备份解析
 
 ```bash
 fleetctl parse-backup /path/to/backup --json
 ```
 
-### 4.9 monitor - 监控设备连接
+### 4.10 monitor - 监控设备连接
 
 ```bash
 fleetctl monitor
 ```
 
-### 4.10 mac - 本机 Mac 管理（macOS）
+### 4.11 mac - 本机 Mac 管理（macOS）
 
 在 Mac 本机运行，使用公开 macOS 命令行工具，**只读**（无写入、无 sudo、无 MDM 绕过）。
 

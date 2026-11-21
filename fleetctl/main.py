@@ -21,6 +21,7 @@ from fleetctl.wipe_manager import WipeManager, WipeOptions, quick_wipe, full_wip
 from fleetctl.report_generator import generate_device_report, ReportConfig
 from fleetctl.usb_manager import USBDeviceManager, BulkOperationManager, create_device_manager, DeviceFilter
 from fleetctl.report_generator import ReportGeneratorFactory
+from fleetctl.activation_lock import format_verify_text, verify_device
 from fleetctl.precheck import (
     run_precheck_steps,
     generate_precheck_report,
@@ -57,11 +58,12 @@ async def cmd_list_devices(args):
 
 async def cmd_precheck(args):
     """
-    Three-step manual gateway pre-check (三步手工门验证) — read-only.
+    Four-step manual gateway pre-check (四步手工门验证) — read-only.
 
-    Step 1: Erase availability (can "Erase All Content and Settings" be used?)
-    Step 2: Offline Setup Assistant (reached the Wi-Fi-before screen)
-    Step 3: USB pairing (lockdown channel healthy)
+    Step 1: Activation lock (does Apple's activation server let it activate?)
+    Step 2: Erase availability (can "Erase All Content and Settings" be used?)
+    Step 3: Offline Setup Assistant (reached the Wi-Fi-before screen)
+    Step 4: USB pairing (lockdown channel healthy)
 
     This tool never erases or modifies a device. With ``--confirm`` the flow
     becomes interactive: after Step 1 it prints erase guidance and, with
@@ -85,7 +87,12 @@ async def cmd_precheck(args):
 
     collector = DeviceInfoCollector()
     prechecks = []
-    step_index = {"erase_available": 1, "setup_assistant_offline": 2, "usb_pairing": 3}
+    step_index = {
+        "activation_lock": 1,
+        "erase_available": 2,
+        "setup_assistant_offline": 3,
+        "usb_pairing": 4,
+    }
 
     for device in devices:
         udid = device["udid"]
@@ -98,7 +105,7 @@ async def cmd_precheck(args):
 
         def _show_step(name, res):
             idx = step_index[name]
-            print(f"\n[Step {idx}/3] Checking {name.replace('_', ' ')}...")
+            print(f"\n[Step {idx}/4] Checking {name.replace('_', ' ')}...")
             print(f"  Result: {res.get('status', 'unknown')}")
             details = res.get("details")
             if isinstance(details, dict):
@@ -110,9 +117,21 @@ async def cmd_precheck(args):
         result = await run_precheck_steps(udid, collector, device, on_step=_show_step)
         steps = result["steps"]
 
-        # Step 1 guidance: if erase is available but we are not yet in the
+        # Step 1 guidance: a locked device is the end of the line. Erasing does
+        # not remove an activation lock or an MDM enrollment, so do not send the
+        # operator through the erase flow.
+        lock_status = steps["activation_lock"].get("status")
+        if lock_status in ("ICLOUD_LOCK", "MDM_LOCK"):
+            _print_lock_guidance(steps["activation_lock"])
+        elif lock_status == "UNDETERMINED":
+            print("\n" + "-" * 60)
+            print("WARNING: activation lock status could not be determined.")
+            print("  Treat this device as unverified. Retry on a stable connection")
+            print("  before buying, erasing, or confirming receipt.")
+            print("-" * 60)
+        # Step 2 guidance: if erase is available but we are not yet in the
         # offline Setup Assistant window, guide the operator and optionally wait.
-        if steps["erase_available"]["passed"] and not steps["setup_assistant_offline"]["passed"]:
+        elif steps["erase_available"]["passed"] and not steps["setup_assistant_offline"]["passed"]:
             _print_erase_guidance()
             if getattr(args, "confirm", False):
                 answer = input(WAIT_ACK_PROMPT).strip().upper()
@@ -135,7 +154,7 @@ async def cmd_precheck(args):
         print(f"\n{'=' * 60}")
         print(f"PRE-CHECK SUMMARY: {'PASSED' if overall else 'FAILED'}")
         print(f"{'=' * 60}")
-        for key in ["erase_available", "setup_assistant_offline", "usb_pairing"]:
+        for key in ["activation_lock", "erase_available", "setup_assistant_offline", "usb_pairing"]:
             mark = "[OK]" if steps[key]["passed"] else "[FAIL]"
             print(f"  {step_label(key):<26} {mark}")
 
@@ -158,10 +177,83 @@ async def cmd_precheck(args):
         print(f"\nAudit report written: {report_path} ({fmt})")
 
 
+async def cmd_verify(args):
+    """Post-erase verification (擦除后激活锁复验).
+
+    Run after the erase, while the device sits in Setup Assistant. Apple's
+    activation server gives a definitive answer here, which is the only way to
+    tell a clean device from one that was merely signed out of iCloud.
+
+    Exit codes: 0 clean, 1 locked (iCloud / MDM), 2 not verified.
+    """
+    udid = getattr(args, "udid", None)
+
+    if not udid:
+        manager = USBDeviceManager()
+        devices = await manager.enumerate()
+        if not devices:
+            print("No devices connected.")
+            return 2
+        if len(devices) > 1:
+            print("Multiple devices connected. Pass --udid to choose one.")
+            return 2
+        udid = devices[0]["udid"]
+
+    timeout = float(getattr(args, "wait", 0) or 0)
+    interval = float(getattr(args, "interval", 5.0) or 5.0)
+
+    print(f"Verifying device {udid}...")
+    if timeout > 0:
+        print(f"  Polling up to {timeout:.0f}s for a verifiable state...")
+
+    result = await verify_device(udid, timeout=timeout, interval=interval)
+    print(format_verify_text(result))
+
+    if getattr(args, "json", False):
+        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+
+    report_path = getattr(args, "report", None)
+    if report_path:
+        Path(report_path).write_text(
+            json.dumps(result.to_dict(), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        print(f"\nVerification record written: {report_path}")
+
+    return result.exit_code
+
+
 def _print_erase_guidance():
     print("\n" + "-" * 60)
     print("NEXT: manual erase on the device (fleetctl does not erase devices).")
     print(ERASE_GUIDANCE)
+    print("-" * 60)
+
+
+def _print_lock_guidance(step):
+    """Explain a blocking activation/MDM lock and what can actually release it."""
+    details = step.get("details") or {}
+    status = step.get("status")
+
+    print("\n" + "-" * 60)
+    print("BLOCKED: this device cannot be activated.")
+    if status == "ICLOUD_LOCK":
+        print("  Type: iCloud Activation Lock (物主锁定)")
+        account = details.get("masked_account")
+        if account:
+            print(f"  Linked Apple account: {account}")
+        print("  Release: the account holder signs out of iCloud, or Apple")
+        print("           removes the lock against an original purchase receipt.")
+    else:
+        print("  Type: MDM Remote Management (managed / enterprise device)")
+        organization = details.get("organization")
+        if organization:
+            print(f"  Organization: {organization}")
+        print("  Release: only the owning organization can release the device.")
+    message = details.get("server_message")
+    if message:
+        print(f'  Server: "{message}"')
+    print("  Do not erase: erasing removes neither lock and loses the evidence.")
     print("-" * 60)
 
 
@@ -759,7 +851,7 @@ def main():
     wipe_parser.add_argument("--json", action="store_true", help="Output as JSON")
     
     # precheck command (三步手工门验证)
-    precheck_parser = subparsers.add_parser("precheck", help="Three-step manual gateway verification (三步手工门验证)")
+    precheck_parser = subparsers.add_parser("precheck", help="Four-step manual gateway verification (四步手工门验证)")
     precheck_parser.add_argument("--udid", help="Device UDID (optional, checks all if not specified)")
     precheck_parser.add_argument("--json", action="store_true", help="Output as JSON")
     precheck_parser.add_argument("--confirm", action="store_true", help="Enable interactive guided erase flow (prompts for READY)")
@@ -768,7 +860,20 @@ def main():
     precheck_parser.add_argument("--report-format", choices=["json", "html"], default="json", help="Audit report format (default: json)")
     precheck_parser.add_argument("--title", default="fleetctl Pre-check Audit Report", help="Audit report title")
     precheck_parser.add_argument("--company", help="Company name for the audit report")
-    
+
+    # verify command (擦除后激活锁复验)
+    verify_parser = subparsers.add_parser(
+        "verify",
+        help="Verify a device will activate after erase (擦除后激活锁复验)",
+    )
+    verify_parser.add_argument("--udid", help="Device UDID (defaults to the only connected device)")
+    verify_parser.add_argument("--wait", type=int, default=0, metavar="SECONDS",
+                               help="Poll up to SECONDS for the device to become verifiable (use right after an erase)")
+    verify_parser.add_argument("--interval", type=float, default=5.0, metavar="SECONDS",
+                               help="Polling interval (default: 5)")
+    verify_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    verify_parser.add_argument("--report", metavar="PATH", help="Write a JSON verification record to PATH")
+
     # report command
     report_parser = subparsers.add_parser("report", help="Generate device report")
     report_parser.add_argument("--input", help="Input JSON file with device data")
@@ -844,6 +949,8 @@ def main():
         _run(cmd_list_devices(args))
     elif args.command == "precheck":
         _run(cmd_precheck(args))
+    elif args.command == "verify":
+        sys.exit(_run(cmd_verify(args)))
     elif args.command == "parse-backup":
         _run(cmd_parse_backup(args))
     elif args.command == "wipe":
