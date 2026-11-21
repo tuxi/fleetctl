@@ -148,7 +148,7 @@
   .mode-chip.live { color: var(--clean); border-color: var(--clean); }
 
   /* ---------------- main ---------------- */
-  .main { display: flex; flex-direction: column; min-width: 0; background: var(--surface); }
+  .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface); }
   .bar {
     display: flex; align-items: center; gap: 14px;
     padding: 14px 22px;
@@ -205,7 +205,7 @@
     border-top: 1px solid var(--line);
   }
 
-  .views { flex: 1; overflow: auto; }
+  .views { flex: 1 1 auto; min-height: 0; overflow: auto; }
   .view { display: none; }
   .view.active { display: block; }
 
@@ -753,7 +753,6 @@
         <kbd>⌘K</kbd>
       </label>
       <button class="icon-btn" id="theme-btn" title="切换深色模式" aria-label="切换深色模式">◐</button>
-      <button class="btn" id="export-btn">导出</button>
       <button class="btn btn-primary" id="intake-open">登记收机</button>
     </header>
 
@@ -3248,9 +3247,6 @@ document.querySelectorAll(".insp-foot .btn")[0].addEventListener("click", () => 
   toast("已生成验机报告");
 });
 
-document.getElementById("export-btn").addEventListener("click", () => {
-  toast(`已导出 ${devices.length} 台设备的验机记录`);
-});
 document.getElementById("intake-open").addEventListener("click", openIntake);
 
 renderTable();
