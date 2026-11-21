@@ -425,6 +425,15 @@
     border: 1px solid var(--line-strong); border-radius: 100px;
     padding: 1px 8px;
   }
+  .sheet ol.terms {
+    margin: 8px 0 0 18px; padding: 0;
+    font-size: 12px; color: var(--ink-2); line-height: 1.85;
+  }
+  .sign-row { display: flex; gap: 36px; margin-top: 32px; }
+  .sign-row div {
+    flex: 1; border-top: 1px solid var(--line-strong);
+    padding-top: 6px; font-size: 12px; color: var(--ink-3);
+  }
   .report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; }
   .report-grid div { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
   .report-grid .k { color: var(--ink-3); width: 76px; flex: 0 0 auto; }
@@ -681,7 +690,7 @@
     .rail, .bar, .inspector, .toast, .report-bar { display: none !important; }
     .app { display: block; height: auto; }
     .view { display: none !important; }
-    #view-report { display: block !important; }
+    #view-report.active, #view-receipt.active { display: block !important; }
     .report-wrap { padding: 0; }
     .sheet { border: 0; max-width: none; padding: 0; }
     body { background: #fff; }
@@ -934,6 +943,19 @@
         </div>
       </section>
 
+      <!-- receipt -->
+      <section class="view" id="view-receipt">
+        <div class="report-bar">
+          <span class="muted" id="receipt-view-sub">—</span>
+          <span style="flex:1"></span>
+          <button class="btn" id="receipt-back">返回看板</button>
+          <button class="btn" id="receipt-print">打印</button>
+        </div>
+        <div class="report-wrap">
+          <article class="sheet" id="receipt-sheet"></article>
+        </div>
+      </section>
+
       <!-- batch -->
       <section class="view" id="view-batch">
         <div class="stats">
@@ -1026,6 +1048,10 @@ d•••••@6•••••.com</div>
       <button class="btn" id="insp-hw-open" style="width:100%;margin-top:6px">开始硬件体检</button>
 
       <button class="btn" id="insp-delete" style="width:100%;margin-top:14px;display:none">删除这台设备</button>
+
+      <div class="section-title">交易凭证</div>
+      <div class="hw-empty" id="insp-receipt-summary">尚未生成</div>
+      <button class="btn" id="insp-receipt-open" style="width:100%;margin-top:6px">生成收机单</button>
 
       <div class="section-title">处理建议</div>
       <ul class="advice" id="insp-advice"></ul>
@@ -1211,6 +1237,43 @@ d•••••@6•••••.com</div>
   <div class="modal-foot">
     <button type="button" class="btn" id="history-cancel">关闭</button>
   </div>
+</div>
+
+<div class="modal" id="receipt-modal" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
+  <div class="modal-head">
+    <h3 id="receipt-title">收机单</h3>
+    <span class="hint" id="receipt-sub">—</span>
+    <span style="flex:1"></span>
+    <button class="icon-btn" id="receipt-close" aria-label="关闭">×</button>
+  </div>
+  <form id="receipt-form">
+    <div class="modal-body">
+      <div class="field">
+        <label for="r-name">卖方姓名</label>
+        <input id="r-name" required autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="r-phone">联系电话</label>
+        <input id="r-phone" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="r-id">身份证号</label>
+        <input id="r-id" placeholder="选填，用于留档" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="r-amount">成交价</label>
+        <input id="r-amount" type="number" min="0" step="10" required>
+      </div>
+      <div class="field wide">
+        <label for="r-note">备注</label>
+        <input id="r-note" placeholder="配件、外观说明等" autocomplete="off">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn" id="receipt-cancel">取消</button>
+      <button type="submit" class="btn btn-primary">生成收机单</button>
+    </div>
+  </form>
 </div>
 
 <script>
@@ -1471,6 +1534,13 @@ function selectDevice(id, open = true) {
   deleteButton.textContent = "删除这台设备";
   deleteButton.classList.remove("danger");
   deleteArmedFor = null;
+
+  const receiptSummary = d.receiptNo
+    ? `${d.receiptNo}${d.sellerName ? " · " + d.sellerName : ""}`
+    : "尚未生成";
+  document.getElementById("insp-receipt-summary").textContent = receiptSummary;
+  document.getElementById("insp-receipt-open").textContent =
+    d.receiptNo ? "重新生成收机单" : "生成收机单";
 
   const badge = document.getElementById("insp-badge");
   badge.className = "badge " + d.status;
@@ -1792,14 +1862,21 @@ function showVerdict(d, result) {
 
 async function archiveReport(d) {
   try {
-    await fetch(`${API_BASE}/api/reports`, {
+    const res = await fetch(`${API_BASE}/api/reports`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ device: d, report: reportData(d) }),
     });
+    const data = await res.json();
+    if (data.ok) {
+      d.reportHash = data.sha256;
+      saveManualDevices();
+      return data.sha256;
+    }
   } catch (err) {
     // Archiving is best-effort.
   }
+  return null;
 }
 
 document.getElementById("wiz-action").addEventListener("click", async () => {
@@ -2973,6 +3050,7 @@ function reportData(d) {
 
 function renderReport(d, options = {}) {
   const archived = options.archived === true;
+  const archivedHash = options.sha256 || null;
   const sheet = document.getElementById("report-sheet");
   const sub = document.getElementById("report-sub");
   const notice = document.getElementById("report-notice");
@@ -3077,8 +3155,9 @@ function renderReport(d, options = {}) {
       <div><span class="k">来源 / 卖家 / 价格</span><span class="v">人工录入</span></div>
     </div>`);
 
+  const fingerprint = archivedHash || d.reportHash || null;
   parts.push(`<div class="sheet-foot">
-    <span>生成于 ${esc(when)}</span>
+    <span class="mono">${fingerprint ? "SHA-256 " + esc(fingerprint) : "尚未生成指纹"}</span>
     <span>只读检测 · 数据来自设备与 Apple 激活服务器</span>
   </div>`);
 
@@ -3087,19 +3166,11 @@ function renderReport(d, options = {}) {
 
 document.getElementById("report-json").addEventListener("click", async () => {
   if (!current) { toast("先选择一台设备"); return; }
-  const payload = reportData(current);
+
+  const digest = await archiveReport(current);
+  const payload = { ...reportData(current), sha256: digest || current.reportHash || null };
   const filename = `fleetctl-report-${current.serial || current.id}.json`;
   const content = JSON.stringify(payload, null, 2);
-
-  try {
-    await fetch(`${API_BASE}/api/reports`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ device: current, report: payload }),
-    });
-  } catch (err) {
-    // Archiving is best-effort; exporting still proceeds.
-  }
 
   try {
     const res = await fetch(`${API_BASE}/api/export`, {
@@ -3140,7 +3211,7 @@ async function loadArchived(id) {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "读取失败");
     closeHistory();
-    renderReport(data.archived.device, { archived: true });
+    renderReport(data.archived.device, { archived: true, sha256: data.sha256 });
     document.getElementById("report-sub").textContent = `${data.archived.device.name || ""} · 历史记录`;
     toast("已载入历史报告");
   } catch (err) {
@@ -3212,6 +3283,152 @@ document.getElementById("report-back").addEventListener("click", () => {
   renderReport(current);
   toast("已切回当前设备");
 });
+
+let receiptDevice = null;
+
+function receiptNumber(d) {
+  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  return `RC-${stamp}-${String(d.serial || d.id || "").slice(-4).toUpperCase()}`;
+}
+
+function openReceipt(d) {
+  receiptDevice = d;
+  document.getElementById("receipt-sub").textContent = `${d.name} · ${d.serial}`;
+  document.getElementById("r-name").value = d.sellerName || "";
+  document.getElementById("r-phone").value = d.sellerPhone || "";
+  document.getElementById("r-id").value = d.sellerId || "";
+  document.getElementById("r-amount").value =
+    Number(String(d.price || "").replace(/[^\d]/g, "")) || "";
+  document.getElementById("r-note").value = "";
+  document.getElementById("scrim").classList.add("show");
+  document.getElementById("receipt-modal").classList.add("show");
+  document.getElementById("r-name").focus();
+}
+
+function closeReceiptDialog() {
+  document.getElementById("scrim").classList.remove("show");
+  document.getElementById("receipt-modal").classList.remove("show");
+}
+
+function renderReceipt(d) {
+  const sheet = document.getElementById("receipt-sheet");
+  const sub = document.getElementById("receipt-view-sub");
+
+  if (!d) {
+    sub.textContent = "—";
+    sheet.innerHTML = `<div class="empty"><div class="t">还没有收机单</div>
+      <div class="hint">在设备详情里点「生成收机单」。</div></div>`;
+    return;
+  }
+
+  sub.textContent = `${d.name} · ${d.sellerName || "未填写卖方"}`;
+  const when = formatStamp(d.purchaseAt || new Date().toISOString());
+  const number = d.receiptNo || receiptNumber(d);
+  const verdict = `${labels[d.status] || "—"}${d.verdict ? " · " + d.verdict : ""}`;
+
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <div>
+        <h2>收机单</h2>
+        <div class="muted" style="font-size:12px;margin-top:2px">fleetctl · 线下交易留档</div>
+      </div>
+      <div class="meta">No. ${esc(number)}<br>${esc(when)}</div>
+    </div>
+
+    <h4>设备信息</h4>
+    <table>
+      <tr><th>机型</th><td>${esc(d.name)}（${esc(d.model)}）</td><th>序列号</th><td class="mono">${esc(d.serial)}</td></tr>
+      <tr><th>IMEI</th><td class="mono">${esc(d.imei || "—")}</td><th>UDID</th><td class="mono">${esc(d.udid || "—")}</td></tr>
+      <tr><th>验机结论</th><td colspan="3">${esc(verdict)}</td></tr>
+    </table>
+
+    <h4>交易信息</h4>
+    <table>
+      <tr><th>成交价</th><td class="mono">${esc(d.price || "—")}</td><th>成交日期</th><td>${esc(when)}</td></tr>
+      <tr><th>备注</th><td colspan="3">${esc(d.receiptNote || "—")}</td></tr>
+    </table>
+
+    <h4>卖方信息</h4>
+    <table>
+      <tr><th>姓名</th><td>${esc(d.sellerName || "—")}</td><th>联系电话</th><td class="mono">${esc(d.sellerPhone || "—")}</td></tr>
+      <tr><th>身份证号</th><td colspan="3" class="mono">${esc(d.sellerId || "—")}</td></tr>
+    </table>
+
+    <h4>约定事项</h4>
+    <ol class="terms">
+      <li>卖方保证本机为本人合法所有，来源合法，非盗窃、非遗失、非赃物。</li>
+      <li>卖方保证已如实说明本机的激活锁、监管锁与网络锁状态，未隐瞒任何锁定。</li>
+      <li>买方已当面验机，确认外观与功能状态；验机结论见上方。</li>
+      <li>自交付之日起，本机所有权与风险转移至买方。</li>
+      <li>如卖方隐瞒上述情况，买方有权要求退机并全额退款。</li>
+    </ol>
+
+    <div class="sign-row">
+      <div>卖方签字</div>
+      <div>买方签字</div>
+      <div>日期</div>
+    </div>
+
+    <div class="sheet-foot">
+      <span class="mono">${d.receiptHash ? "SHA-256 " + esc(d.receiptHash) : "未归档"}</span>
+      <span>本单由 fleetctl 生成 · 线下交易留档</span>
+    </div>`;
+}
+
+document.getElementById("insp-receipt-open").addEventListener("click", () => {
+  if (current) openReceipt(current);
+});
+
+document.getElementById("receipt-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const d = receiptDevice;
+  if (!d) return;
+
+  const receipt = {
+    receipt_no: receiptNumber(d),
+    created_at: new Date().toISOString(),
+    seller_name: document.getElementById("r-name").value.trim(),
+    seller_phone: document.getElementById("r-phone").value.trim(),
+    seller_id: document.getElementById("r-id").value.trim(),
+    amount: Number(document.getElementById("r-amount").value || 0),
+    note: document.getElementById("r-note").value.trim(),
+  };
+
+  d.sellerName = receipt.seller_name;
+  d.sellerPhone = receipt.seller_phone;
+  d.sellerId = receipt.seller_id;
+  d.receiptNote = receipt.note;
+  d.purchaseAt = receipt.created_at;
+  d.receiptNo = receipt.receipt_no;
+  d.receiptHash = null;
+  d.price = "¥" + receipt.amount.toLocaleString("en-US");
+
+  try {
+    const res = await fetch(`${API_BASE}/api/receipts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device: d, receipt }),
+    });
+    const data = await res.json();
+    if (data.ok) d.receiptHash = data.sha256;
+  } catch (err) {
+    // The receipt still renders without an archive fingerprint.
+  }
+
+  saveManualDevices();
+  closeReceiptDialog();
+  renderTable();
+  renderBoard();
+  updateStats();
+  switchView("receipt");
+  renderReceipt(d);
+  toast("收机单已生成");
+});
+
+document.getElementById("receipt-close").addEventListener("click", closeReceiptDialog);
+document.getElementById("receipt-cancel").addEventListener("click", closeReceiptDialog);
+document.getElementById("receipt-back").addEventListener("click", () => switchView("recycle"));
+document.getElementById("receipt-print").addEventListener("click", () => window.print());
 
 const gradeButtons = document.querySelectorAll("#f-grade button");
 gradeButtons.forEach(btn => {
@@ -3301,6 +3518,7 @@ document.getElementById("scrim").addEventListener("click", () => {
   closeSale();
   closeHardware();
   closeHistory();
+  closeReceiptDialog();
 });
 
 const titles = {
@@ -3310,7 +3528,8 @@ const titles = {
   prices: ["价格", "回收价按机型、容量、成色分档"],
   stats: ["统计", "按机型汇总收机、售出与毛利"],
   inspect: ["验机", "iPhone 15 · 第 3 步 / 共 5 步"],
-  report: ["报告", "已生成 28 份 · 最近 11-21 13:42"]
+  report: ["报告", "已生成 28 份 · 最近 11-21 13:42"],
+  receipt: ["收机单", "线下交易留档"]
 };
 
 function switchView(name) {
@@ -3321,7 +3540,7 @@ function switchView(name) {
     if (b.dataset.view === navTarget) b.setAttribute("aria-current", "page");
     else b.removeAttribute("aria-current");
   });
-  const [t, s] = titles[name];
+  const [t, s] = titles[name] || [name, ""];
   document.getElementById("view-title").textContent = t;
   const badCount = devices.filter(d => d.status === "lock" || d.status === "mdm").length;
   document.getElementById("view-sub").textContent =
@@ -3441,6 +3660,7 @@ document.addEventListener("keydown", e => {
     if (document.getElementById("sale-modal").classList.contains("show")) closeSale();
     if (document.getElementById("hw-modal").classList.contains("show")) closeHardware();
     if (document.getElementById("history-modal").classList.contains("show")) closeHistory();
+    if (document.getElementById("receipt-modal").classList.contains("show")) closeReceiptDialog();
   }
 });
 

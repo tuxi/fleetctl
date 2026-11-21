@@ -280,6 +280,32 @@ class Handler(SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": str(exc)}, 500)
             return
 
+        if parsed.path == "/api/receipts":
+            try:
+                self._send_json({"ok": True, "receipts": store.list_receipts()})
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+            return
+
+        if parsed.path.startswith("/api/receipts/"):
+            try:
+                receipt_id = int(parsed.path.rsplit("/", 1)[1])
+            except ValueError:
+                self._send_json({"ok": False, "error": "invalid id"}, 400)
+                return
+            try:
+                entry = store.get_receipt(receipt_id)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+                return
+            if entry is None:
+                self._send_json({"ok": False, "error": "not found"}, 404)
+            else:
+                self._send_json(
+                    {"ok": True, "archived": entry["payload"], "sha256": entry["sha256"]}
+                )
+            return
+
         if parsed.path == "/api/reports":
             try:
                 self._send_json({"ok": True, "reports": store.list_reports()})
@@ -294,14 +320,16 @@ class Handler(SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "invalid id"}, 400)
                 return
             try:
-                archived = store.get_report(report_id)
+                entry = store.get_report(report_id)
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, 500)
                 return
-            if archived is None:
+            if entry is None:
                 self._send_json({"ok": False, "error": "not found"}, 404)
             else:
-                self._send_json({"ok": True, "archived": archived})
+                self._send_json(
+                    {"ok": True, "archived": entry["payload"], "sha256": entry["sha256"]}
+                )
             return
 
         super().do_GET()
@@ -356,7 +384,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib naming
         parsed = urlparse(self.path)
-        if parsed.path not in ("/api/export", "/api/reports"):
+        if parsed.path not in ("/api/export", "/api/reports", "/api/receipts"):
             self._send_json({"ok": False, "error": "not found"}, 404)
             return
 
@@ -381,11 +409,25 @@ class Handler(SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "device and report required"}, 400)
                 return
             try:
-                report_id = store.add_report(device, report)
+                report_id, digest = store.add_report(device, report)
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, 500)
                 return
-            self._send_json({"ok": True, "id": report_id})
+            self._send_json({"ok": True, "id": report_id, "sha256": digest})
+            return
+
+        if parsed.path == "/api/receipts":
+            device = payload.get("device") if isinstance(payload, dict) else None
+            receipt = payload.get("receipt") if isinstance(payload, dict) else None
+            if not isinstance(device, dict) or not isinstance(receipt, dict):
+                self._send_json({"ok": False, "error": "device and receipt required"}, 400)
+                return
+            try:
+                receipt_id, digest = store.add_receipt(device, receipt)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+                return
+            self._send_json({"ok": True, "id": receipt_id, "sha256": digest})
             return
 
         content = payload.get("content") if isinstance(payload, dict) else None
