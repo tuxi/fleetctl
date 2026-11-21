@@ -188,6 +188,23 @@ def save_store(devices: list[dict]) -> None:
     os.replace(tmp, path)
 
 
+def export_dir() -> str:
+    downloads = os.path.expanduser("~/Downloads")
+    if os.path.isdir(downloads):
+        return downloads
+    return os.path.expanduser("~/Documents")
+
+
+def write_export(filename: str, content: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", filename)[:120] or "report.json"
+    path = os.path.join(export_dir(), safe)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+    return path
+
+
 async def hardware(udid: str) -> dict:
     """Battery readings from the diagnostics service.
 
@@ -310,6 +327,39 @@ class Handler(SimpleHTTPRequestHandler):
 
         self._send_json({"ok": True, "count": len(rows), "path": store_path()})
 
+    def do_POST(self) -> None:  # noqa: N802 - stdlib naming
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/export":
+            self._send_json({"ok": False, "error": "not found"}, 404)
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0 or length > MAX_BODY:
+            self._send_json({"ok": False, "error": "invalid body size"}, 400)
+            return
+
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._send_json({"ok": False, "error": "invalid json"}, 400)
+            return
+
+        content = payload.get("content") if isinstance(payload, dict) else None
+        if not isinstance(content, str):
+            self._send_json({"ok": False, "error": "content must be a string"}, 400)
+            return
+
+        try:
+            path = write_export(payload.get("filename") or "report.json", content)
+        except Exception as exc:
+            self._send_json({"ok": False, "error": str(exc)}, 500)
+            return
+
+        self._send_json({"ok": True, "path": path})
+
     def do_OPTIONS(self) -> None:  # noqa: N802 - stdlib naming
         self.send_response(204)
         self._cors_headers()
@@ -320,7 +370,7 @@ class Handler(SimpleHTTPRequestHandler):
         # The Tauri shell serves the UI from tauri://localhost, so the bridge
         # must allow cross-origin reads.
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _send_json(self, payload: dict, status: int = 200) -> None:

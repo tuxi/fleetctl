@@ -401,11 +401,30 @@
   .sheet th { color: var(--ink-3); font-weight: 500; width: 132px; }
   .sheet .conclusion {
     margin-top: 8px; padding: 16px 18px;
-    border: 1px solid var(--lock); border-radius: 6px;
-    background: var(--lock-soft);
+    border: 1px solid var(--line-strong); border-radius: 6px;
+    background: var(--surface-2);
   }
-  .sheet .conclusion .t { font-size: 18px; font-weight: 600; color: var(--lock); }
+  .sheet .conclusion .t { font-size: 18px; font-weight: 600; }
   .sheet .conclusion p { margin: 4px 0 0; color: var(--ink-2); font-size: 12px; }
+  .sheet .conclusion.clean { border-color: var(--clean); background: var(--clean-soft); }
+  .sheet .conclusion.clean .t { color: var(--clean); }
+  .sheet .conclusion.lock { border-color: var(--lock); background: var(--lock-soft); }
+  .sheet .conclusion.lock .t { color: var(--lock); }
+  .sheet .conclusion.mdm { border-color: var(--mdm); background: var(--mdm-soft); }
+  .sheet .conclusion.mdm .t { color: var(--mdm); }
+
+  .report-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 28px;
+    border-bottom: 1px solid var(--line);
+  }
+  .report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; }
+  .report-grid div { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+  .report-grid .k { color: var(--ink-3); width: 76px; flex: 0 0 auto; }
+  .report-grid .v { color: var(--ink); }
+  .report-ok { color: var(--clean); }
+  .report-bad { color: var(--lock); }
+  .report-none { color: var(--ink-3); }
   .sheet-foot { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--line);
     display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
 
@@ -621,7 +640,7 @@
   }
 
   @media print {
-    .rail, .bar, .inspector, .toast { display: none !important; }
+    .rail, .bar, .inspector, .toast, .report-bar { display: none !important; }
     .app { display: block; height: auto; }
     .view { display: none !important; }
     #view-report { display: block !important; }
@@ -798,43 +817,14 @@
 
       <!-- report -->
       <section class="view" id="view-report">
+        <div class="report-bar">
+          <span class="muted" id="report-sub">—</span>
+          <span style="flex:1"></span>
+          <button class="btn" id="report-json">导出 JSON</button>
+          <button class="btn" id="report-print">打印</button>
+        </div>
         <div class="report-wrap">
-          <article class="sheet">
-            <div class="sheet-head">
-              <div>
-                <h2>设备验机报告</h2>
-                <div class="muted" style="font-size:12px;margin-top:2px">fleetctl · 只读检测，未修改设备</div>
-              </div>
-              <div class="meta">
-                No. FC-2026-1121-014<br>
-                2026-11-21 13:42
-              </div>
-            </div>
-
-            <h4>设备标识</h4>
-            <table>
-              <tr><th>机型</th><td>iPhone 15（iPhone16,1）</td><th>序列号</th><td class="mono">GN762JNQYM</td></tr>
-              <tr><th>IMEI</th><td class="mono">355589712887838</td><th>系统</th><td>iOS 27.2 (24B119)</td></tr>
-            </table>
-
-            <h4>结论</h4>
-            <div class="conclusion">
-              <div class="t">激活锁 — 不建议交易</div>
-              <p>设备绑定在他人 Apple 账户下，服务器拒绝激活。该锁定在擦除后仍然存在。</p>
-            </div>
-
-            <h4>服务器判定</h4>
-            <table>
-              <tr><th>判定结果</th><td>Activation Lock</td></tr>
-              <tr><th>绑定账户</th><td class="mono">d•••••@6•••••.com</td></tr>
-              <tr><th>激活状态</th><td class="mono">Unactivated</td></tr>
-            </table>
-
-            <div class="sheet-foot">
-              <span>SHA-256 93f2…c41a</span>
-              <span>只读检测 · 记录不可篡改</span>
-            </div>
-          </article>
+          <article class="sheet" id="report-sheet"></article>
         </div>
       </section>
 
@@ -2284,6 +2274,205 @@ document.getElementById("hw-save").addEventListener("click", () => {
 document.getElementById("hw-close").addEventListener("click", closeHardware);
 document.getElementById("hw-cancel").addEventListener("click", closeHardware);
 
+function esc(value) {
+  return String(value == null ? "—" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function reportNumber(d) {
+  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  return `FC-${stamp}-${String(d.serial || d.id || "").slice(-4).toUpperCase()}`;
+}
+
+function conclusionFor(d) {
+  const map = {
+    clean: ["设备干净 — 可以通过 Apple 激活", "服务器接受了激活请求，未返回锁挑战。"],
+    lock: ["激活锁 — 不建议交易", d.hint || "设备绑定在他人 Apple 账户下，服务器拒绝激活。"],
+    mdm: ["MDM 监管 — 不建议交易", d.hint || "设备由企业或租赁机构监管。"],
+    unknown: ["未验证 — 需要进一步确认", d.hint || "没有得到结论，不能当作干净设备。"],
+  };
+  return map[d.status] || map.unknown;
+}
+
+function reportData(d) {
+  return {
+    generated_at: new Date().toISOString(),
+    report_no: reportNumber(d),
+    device: {
+      name: d.name,
+      model: d.model,
+      serial: d.serial,
+      imei: d.imei,
+      ios: d.ios,
+      build: d.buildVersion || null,
+      activation: d.activationState || null,
+      source: d.source,
+    },
+    verdict: {
+      status: d.status,
+      title: d.verdict,
+      hint: d.hint,
+      account: d.account || null,
+      organization: d.org || null,
+      server_message: d.serverQuote || null,
+    },
+    findmy: d.real ? { locked: !!d.findmyLocked, account: d.findmyAccount || null } : null,
+    machine: d.real
+      ? {
+          erased_at: d.eraseAt || null,
+          erase_method: d.eraseMethod || null,
+          panic_records: d.panicRecords || 0,
+          baseband: `${d.basebandStatus} ${d.basebandVersion}`,
+          sim: d.simStatus,
+          screen_locked: !!d.screenLocked,
+          boot_args: d.bootArgs || "",
+        }
+      : null,
+    hardware: d.hardware || null,
+    trade: {
+      price: d.price || null,
+      sale_price: d.salePrice || null,
+      margin: typeof d.margin === "number" ? d.margin : null,
+      sold_price: d.soldPrice || null,
+      sold_at: d.soldAt || null,
+      buyer: d.buyer || null,
+    },
+  };
+}
+
+function renderReport(d) {
+  const sheet = document.getElementById("report-sheet");
+  const sub = document.getElementById("report-sub");
+
+  if (!d) {
+    sub.textContent = "—";
+    sheet.innerHTML = `<div class="empty"><div class="t">先选择一台设备</div>
+      <div class="hint">报告会按当前设备的检测结果生成。</div></div>`;
+    return;
+  }
+
+  sub.textContent = `${d.name} · ${d.serial}`;
+  const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const when = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const [title, prose] = conclusionFor(d);
+  const parts = [];
+
+  parts.push(`<div class="sheet-head">
+    <div>
+      <h2>设备验机报告</h2>
+      <div class="muted" style="font-size:12px;margin-top:2px">fleetctl · 只读检测，未修改设备</div>
+    </div>
+    <div class="meta">No. ${esc(reportNumber(d))}<br>${esc(when)}</div>
+  </div>`);
+
+  const ios = d.ios === "—" ? "—" : `iOS ${d.ios}${d.buildVersion && d.buildVersion !== "—" ? ` (${d.buildVersion})` : ""}`;
+  parts.push(`<h4>设备标识</h4>
+    <table>
+      <tr><th>机型</th><td>${esc(d.name)}（${esc(d.model)}）</td><th>序列号</th><td class="mono">${esc(d.serial)}</td></tr>
+      <tr><th>IMEI</th><td class="mono">${esc(d.imei)}</td><th>系统</th><td>${esc(ios)}</td></tr>
+    </table>`);
+
+  parts.push(`<h4>结论</h4>
+    <div class="conclusion ${d.status}">
+      <div class="t">${esc(title)}</div>
+      <p>${esc(prose)}</p>
+    </div>`);
+
+  const server = [];
+  if (d.status === "lock") {
+    server.push(`<tr><th>判定结果</th><td>Activation Lock</td></tr>`);
+    if (d.account) server.push(`<tr><th>绑定账户</th><td class="mono">${esc(d.account)}</td></tr>`);
+  } else if (d.status === "mdm") {
+    server.push(`<tr><th>判定结果</th><td>Remote Management</td></tr>`);
+    if (d.org) server.push(`<tr><th>所属机构</th><td>${esc(d.org)}</td></tr>`);
+  } else if (d.status === "clean") {
+    server.push(`<tr><th>判定结果</th><td>Activation accepted</td></tr>`);
+  } else {
+    server.push(`<tr><th>判定结果</th><td>未获得结论</td></tr>`);
+  }
+  if (d.serverQuote) server.push(`<tr><th>服务器原话</th><td>${esc(d.serverQuote)}</td></tr>`);
+  parts.push(`<h4>服务器判定</h4><table>${server.join("")}</table>`);
+
+  if (d.real) {
+    const erase = d.eraseAt ? `${d.eraseAt} · ${d.eraseMethod || "未知方式"}` : "无记录";
+    const screen = d.activationState !== "Activated" ? "不适用 · 未激活" : d.screenLocked ? "已锁定" : "已解锁";
+    parts.push(`<h4>机器状态</h4><div class="report-grid">
+      <div><span class="k">擦除记录</span><span class="v">${esc(erase)}</span></div>
+      <div><span class="k">内核崩溃</span><span class="v ${d.panicRecords ? "report-bad" : ""}">${d.panicRecords ? d.panicRecords + " 条" : "无记录"}</span></div>
+      <div><span class="k">基带</span><span class="v">${esc(d.basebandStatus + " · " + d.basebandVersion)}</span></div>
+      <div><span class="k">SIM</span><span class="v">${esc(simLabel(d.simStatus))}</span></div>
+      <div><span class="k">Find My</span><span class="v">${d.findmyLocked ? "已开启" + (d.findmyAccount ? " · " + d.findmyAccount : "") : "未开启"}</span></div>
+      <div><span class="k">锁屏</span><span class="v">${esc(screen)}</span></div>
+    </div>`);
+  }
+
+  if (d.hardware) {
+    const b = d.hardware.battery;
+    const line = b
+      ? `健康 ${b.health_percent == null ? "—" : b.health_percent + "%"} · 循环 ${b.cycle_count ?? "—"} 次 · ${b.full_capacity || "—"}/${b.design_capacity || "—"} mAh`
+      : "未读取电池数据";
+    const checks = HW_CHECKS.map(([key, label]) => {
+      const value = d.hardware.checks?.[key];
+      const text = value === "ok" ? "正常" : value === "bad" ? "异常" : "未测";
+      const cls = value === "ok" ? "report-ok" : value === "bad" ? "report-bad" : "report-none";
+      return `<div><span class="k">${esc(label)}</span><span class="v ${cls}">${text}</span></div>`;
+    }).join("");
+    parts.push(`<h4>硬件体检</h4>
+      <table><tr><th>电池</th><td>${esc(line)}</td></tr></table>
+      <div class="report-grid" style="margin-top:8px">${checks}</div>`);
+  }
+
+  const trade = [];
+  if (d.price && d.price !== "—") trade.push(`<tr><th>回收价</th><td class="mono">${esc(d.price)}</td></tr>`);
+  if (d.salePrice) trade.push(`<tr><th>预计出货价</th><td class="mono">${esc(d.salePrice)}</td></tr>`);
+  if (d.soldPrice) trade.push(`<tr><th>实际售价</th><td class="mono">${esc(d.soldPrice)}${d.soldAt ? " · " + esc(d.soldAt) : ""}</td></tr>`);
+  if (typeof d.margin === "number") trade.push(`<tr><th>毛利</th><td class="mono">¥${d.margin.toLocaleString("en-US")}</td></tr>`);
+  if (d.buyer) trade.push(`<tr><th>买家</th><td>${esc(d.buyer)}</td></tr>`);
+  if (trade.length) parts.push(`<h4>交易信息</h4><table>${trade.join("")}</table>`);
+
+  parts.push(`<div class="sheet-foot">
+    <span>生成于 ${esc(when)}</span>
+    <span>只读检测 · 数据来自设备与 Apple 激活服务器</span>
+  </div>`);
+
+  sheet.innerHTML = parts.join("");
+}
+
+document.getElementById("report-json").addEventListener("click", async () => {
+  if (!current) { toast("先选择一台设备"); return; }
+  const payload = reportData(current);
+  const filename = `fleetctl-report-${current.serial || current.id}.json`;
+  const content = JSON.stringify(payload, null, 2);
+
+  try {
+    const res = await fetch(`${API_BASE}/api/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename, content }),
+    });
+    const data = await res.json();
+    if (data.ok) { toast(`已导出到 ${data.path}`); return; }
+  } catch (err) {
+    // fall through to the browser download
+  }
+
+  const blob = new Blob([content], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  toast("报告已导出");
+});
+
+document.getElementById("report-print").addEventListener("click", () => {
+  if (!current) { toast("先选择一台设备"); return; }
+  window.print();
+});
+
 const gradeButtons = document.querySelectorAll("#f-grade button");
 gradeButtons.forEach(btn => {
   btn.addEventListener("click", () => {
@@ -2375,6 +2564,7 @@ function switchView(name) {
   appEl.classList.remove("overlay-inspector");
   if (name === "recycle") renderBoard();
   if (name === "batch") renderBatch();
+  if (name === "report") renderReport(current);
 }
 
 document.querySelectorAll(".nav-item").forEach(btn => {
