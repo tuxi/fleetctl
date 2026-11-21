@@ -23,9 +23,9 @@
 | M1 | v0.1.0 | MVP 完成：基础 CLI、设备检测、备份解析、报告生成 | ✅ 完成 |
 | M2 | v0.2.0 | **precheck 自动化**（三步手工门全自动化） | ✅ 完成 |
 | M3 | v0.3.0 | 报告专业化 + 批量操作增强 | ✅ 完成 |
-| M4 | v0.4.0 | 文档完善 + 打包分发 + CI/CD | 🔄 进行中 |
+| M4 | v0.4.0 | 文档完善 + 打包分发 + CI/CD | ✅ **完成** |
 | M5 | v1.0.0 | 正式发布：商业化就绪 | ⏳ 规划中 |
-| M6 | v0.5.0 | **macOS 支持（本机 Agent，只读 MVP）** | 🔄 进行中 |
+| M6 | v0.5.0 | **macOS 支持（本机 Agent，只读 MVP）** | ✅ **完成** |
 
 ---
 
@@ -38,14 +38,14 @@
 
 | 任务 | 状态 | 验收标准 |
 |------|------|----------|
-| **T4.1 用户手册** | ⏳ 待开始 | docs/user-guide.md 完整，含安装/配置/CLI 参考/故障排查 |
-| **T4.2 API 文档** | ⏳ 待开始 | docs/api.md 完整，含所有公共类/方法/参数/返回值/示例 |
-| **T4.3 合规白皮书** | ⏳ 待开始 | docs/compliance.md 完整，含合规架构/红线/审计/认证 |
-| **T4.4 macOS .dmg 打包** | ⏳ 待开始 | `make dmg` 产出可签名 .dmg，含 fleetctl 二进制 |
-| **T4.5 Windows .msi 打包** | ⏳ 待开始 | `make msi` 产出 .msi，含 fleetctl.exe |
-| **T4.6 Linux .AppImage 打包** | ⏳ 待开始 | `make appimage` 产出 .AppImage |
-| **T4.7 CI/CD 流水线** | ⏳ 待开始 | GitHub Actions: lint/type-check/test/build/release 全自动 |
-| **T4.8 发布自动化** | ⏳ 待开始 | `git tag v0.4.0` 触发自动构建/签名/上传 Release |
+| **T4.1 用户手册** | ✅ **完成** | docs/user-guide.md 完整，含安装/配置/CLI 参考/故障排查 |
+| **T4.2 API 文档** | ✅ **完成** | docs/api.md 完整，含所有公共类/方法/参数/返回值/示例 |
+| **T4.3 合规白皮书** | ✅ **完成** | docs/compliance.md 完整，含合规架构/红线/审计/认证 |
+| **T4.4 macOS .dmg 打包** | ✅ **完成** | `make dmg` 产出可签名 .dmg，含 fleetctl 二进制 |
+| **T4.5 Windows .msi 打包** | ✅ **完成** | `make msi` 产出 .msi，含 fleetctl.exe |
+| **T4.6 Linux .AppImage 打包** | ✅ **完成** | `make appimage` 产出 .AppImage |
+| **T4.7 CI/CD 流水线** | ✅ **完成** | GitHub Actions: lint/type-check/test/build/release 全自动 |
+| **T4.8 发布自动化** | ✅ **完成** | `git tag v0.4.0` 触发自动构建/签名/上传 Release |
 
 ---
 
@@ -53,18 +53,27 @@
 
 ### M5: v1.0.0 - 商业化就绪
 
+| 任务 | 优先级 | 验收标准 |
+|------|--------|----------|
+| **T5.1 许可证管理/激活码系统** | P1 | 离线激活、设备绑定、过期提醒、激活码生成/校验/吊销、离线/在线双模式 |
+| **T5.2 多租户/角色权限 (RBAC)** | P2 | 租户隔离、角色权限矩阵、审计日志、多语言、SSO/OIDC 集成 |
+| **T5.3 插件市场/扩展机制** | P3 | 插件 SDK、签名验证、沙箱隔离、插件市场、热加载 |
+| **T5.4 企业级分发/更新通道** | P1 | 自动更新通道、增量更新、回滚、灰度发布、私有仓库 |
+| **T5.5 审计/合规增强** | P2 | 操作审计日志、合规报告模板、GDPR/数据本地化、SIEM 集成 |
+| **T5.6 监控/告警/运维** | P2 | 健康检查、指标采集、告警规则、Grafana/Prometheus 导出 |
+
 ### M6: v0.5.0 - macOS 支持（本机 Agent，只读 MVP）
 
 Mac 不支持像 iPhone 那样通过 USB 管理（普通运行的 Mac 不暴露 lockdown 服务）。方案：在 Mac 本机运行 `fleetctl`，仅调用公开 macOS CLI。
 
 | 任务 | 状态 | 验收标准 |
 |------|------|----------|
-| 命令执行层 + 平台守卫 | ✅ | 可注入 runner；非 macOS 明确报错 |
-| Mac 盘点采集 | ✅ | 型号/序列号/芯片/macOS/SIP/Gatekeeper/FileVault/MDM/描述文件/磁盘/电池 |
-| Mac 只读预检 | ✅ | SIP / FileVault / Secure Boot / MDM 注册；文本 + JSON/HTML 审计报告 |
-| CLI `mac detect\|precheck\|report` | ✅ | 复用 `report_generator`（json/csv/html/pdf） |
-| 测试 | ✅ | 全部 mock runner，无真实子进程 |
-| **写操作（后续）** | ⏳ | 装/卸描述文件、开 FileVault、擦除 —— 需显式确认，另立阶段 |
+| 命令执行层 + 平台守卫 | ✅ **完成** | 可注入 runner；非 macOS 明确报错 |
+| Mac 盘点采集 | ✅ **完成** | 型号/序列号/芯片/macOS/SIP/Gatekeeper/FileVault/MDM/描述文件/磁盘/电池 |
+| Mac 只读预检 | ✅ **完成** | SIP / FileVault / Secure Boot / MDM 注册；文本 + JSON/HTML 审计报告 |
+| CLI `mac detect\|precheck\|report` | ✅ **完成** | 复用 `report_generator`（json/csv/html/pdf） |
+| 测试 | ✅ **完成** | 全部 mock runner，无真实子进程 |
+| **写操作（后续）** | ⏳ 规划中 | 装/卸描述文件、开 FileVault、擦除 —— 需显式确认，另立阶段 |
 
 **合规**：仅公开 CLI；只读；无 sudo；无 MDM/激活锁绕过。
 
@@ -116,14 +125,14 @@ Mac 不支持像 iPhone 那样通过 USB 管理（普通运行的 Mac 不暴露 
 
 | # | 任务 | 状态 | 责任人 | 截止 |
 |-----|------|------|--------|------|
-| 1 | 用户手册 | ⏳ 待开始 | fleetctl | — |
-| 2 | API 文档 | ⏳ 待开始 | fleetctl | — |
-| 3 | 合规白皮书 | ⏳ 待开始 | fleetctl | — |
-| 4 | macOS .dmg 打包 | ⏳ 待开始 | fleetctl | — |
-| 5 | Windows .msi 打包 | ⏳ 待开始 | fleetctl | — |
-| 6 | Linux .AppImage 打包 | ⏳ 待开始 | fleetctl | — |
-| 7 | CI/CD 流水线 | ⏳ 待开始 | fleetctl | — |
-| 8 | 发布自动化 | ⏳ 待开始 | fleetctl | — |
+| 1 | 用户手册 | ✅ **完成** | fleetctl | — |
+| 2 | API 文档 | ✅ **完成** | fleetctl | — |
+| 3 | 合规白皮书 | ✅ **完成** | fleetctl | — |
+| 4 | macOS .dmg 打包 | ✅ **完成** | fleetctl | — |
+| 5 | Windows .msi 打包 | ✅ **完成** | fleetctl | — |
+| 6 | Linux .AppImage 打包 | ✅ **完成** | fleetctl | — |
+| 7 | CI/CD 流水线 | ✅ **完成** | fleetctl | — |
+| 8 | 发布自动化 | ✅ **完成** | fleetctl | — |
 
 ---
 
