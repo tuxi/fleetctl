@@ -20,99 +20,6 @@ class LicenseStatus(str, Enum):
     REVOKED = "revoked"
     INVALID = "invalid"
     PENDING = "pending"
-
-
-class LicenseFeatures(str, Enum):
-    """Available license features."""
-    # Core features
-    DEVICE_MANAGEMENT = "device_management"
-    DEVICE_WIPE = "device_wipe"
-    DEVICE_PRECHECK = "device_precheck"
-    REPORT_GENERATION = "report_generation"
-    BACKUP_PARSING = "backup_parsing"
-    CONFIG_WRITING = "config_writing"
-
-    # Enterprise features
-    MDM_INTEGRATION = "mdm_integration"
-    BULK_OPERATIONS = "bulk_operations"
-    ADAPTIVE_CONCURRENCY = "adaptive_concurrency"
-    CHECKPOINT_RESUME = "checkpoint_resume"
-
-    # Enterprise/Compliance
-    AUDIT_LOGGING = "audit_logging"
-    COMPLIANCE_REPORTS = "compliance_reports"
-    SIEM_INTEGRATION = "siem_integration"
-    GDPR_COMPLIANCE = "gdpr_compliance"
-
-    # Advanced
-    PLUGIN_MARKETPLACE = "plugin_marketplace"
-    MULTI_TENANT = "multi_tenant"
-    RBAC = "rbac"
-    SSO_OIDC = "sso_oidc"
-
-    @classmethod
-    def all(cls) -> Set["LicenseFeatures"]:
-        return set(LicenseFeatures)
-
-    @classmethod
-    def default(cls) -> Set["LicenseFeatures"]:
-        return {
-            LicenseFeatures.DEVICE_MANAGEMENT,
-            LicenseFeatures.DEVICE_WIPE,
-            LicenseFeatures.DEVICE_PRECHECK,
-            LicenseFeatures.REPORT_GENERATION,
-            LicenseFeatures.BACKUP_PARSING,
-            LicenseFeatures.CONFIG_WRITING,
-        }
-
-    @classmethod
-    def enterprise(cls) -> Set["LicenseFeatures"]:
-        return set(LicenseFeatures) - LicenseFeatures.default()
-
-
-@dataclass
-class DeviceFingerprint:
-    """Device fingerprint for license binding."""
-    udid: str
-    serial_number: str
-    product_type: str
-    hardware_model: str
-    cpu_architecture: str
-    mac_addresses: List[str] = field(default_factory=list)
-    disk_serial: Optional[str] = None
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "DeviceFingerprint":
-        return cls(**data)
-
-    def matches(self, other: "DeviceFingerprint", threshold: float = 0.8) -> bool:
-        """Check if two fingerprints match above threshold."""
-        if self.udid and other.udid and self.udid == other.udid:
-            return True
-        if self.serial_number and other.serial_number and self.serial_number == other.serial_number:
-            return True
-
-        # Fuzzy match on hardware
-        matches = 0
-        total = 0
-        for attr in ["product_type", "hardware_model", "cpu_architecture"]:
-            if getattr(self, attr) and getattr(other, attr):
-                total += 1
-                if getattr(self, attr) == getattr(other, attr):
-                    matches += 1
-        return total == 0 or (matches / total) >= 0.8
-
-
-class LicenseStatus(str, Enum):
-    """License status enumeration."""
-    VALID = "valid"
-    EXPIRED = "expired"
-    REVOKED = "revoked"
-    INVALID = "invalid"
-    PENDING = "pending"
     GRACE_PERIOD = "grace_period"
 
 
@@ -406,9 +313,4 @@ class LicenseInvalidError(LicenseError):
 
 class DeviceNotBoundError(LicenseError):
     """Device not bound to license."""
-    pass
-
-
-class LicenseRevokedError(LicenseError):
-    """License has been revoked."""
     pass
