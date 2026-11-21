@@ -182,7 +182,7 @@ class License:
             return False
         for bound in self.bound_devices:
             fp = DeviceFingerprint.from_dict(bound)
-            if fp.matches(DeviceFingerprint(**device_fingerprint)):
+            if fp.matches(device_fingerprint):
                 return True
         return False
 

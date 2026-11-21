@@ -98,6 +98,34 @@ class TestLicense:
         assert restored.features.to_list() == license_.features.to_list()
 
 
+class TestDeviceBinding:
+    def test_bind_same_device_twice_does_not_raise(self):
+        license_ = License.create_trial("ACME")
+        license_.max_device_bindings = 5
+        device = DeviceFingerprint(udid="udid-1")
+
+        assert license_.bind_device(device) is True
+        # Used to raise TypeError: DeviceFingerprint(**device_fingerprint)
+        assert license_.bind_device(device) is True
+        assert len(license_.bound_devices) == 1
+
+    def test_is_bound_after_binding(self):
+        license_ = License.create_trial("ACME")
+        license_.max_device_bindings = 5
+        license_.bind_device(DeviceFingerprint(udid="udid-1"))
+        assert license_.is_bound_to_device(DeviceFingerprint(udid="udid-1")) is True
+
+    def test_not_bound_before_any_binding(self):
+        license_ = License.create_trial("ACME")
+        assert license_.is_bound_to_device(DeviceFingerprint(udid="udid-1")) is False
+
+    def test_respects_max_device_bindings(self):
+        license_ = License.create_trial("ACME")
+        license_.max_device_bindings = 1
+        assert license_.bind_device(DeviceFingerprint(udid="a")) is True
+        assert license_.bind_device(DeviceFingerprint(udid="b")) is False
+
+
 class TestErrors:
     @pytest.mark.parametrize(
         "error",
