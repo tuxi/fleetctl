@@ -112,6 +112,27 @@ def test_import_usb_manager():
     assert USBDeviceManager is not None
 
 
+def test_import_license():
+    from fleetctl.license import (
+        DeviceFingerprint,
+        DeviceNotBoundError,
+        KeyPair,
+        License,
+        LicenseError,
+        LicenseExpiredError,
+        LicenseFeatures,
+        LicenseInvalidError,
+        LicenseRevokedError,
+        LicenseSigner,
+        LicenseStatus,
+        LicenseVerifier,
+    )
+    assert License() is not None
+    assert LicenseStatus.VALID.value == "valid"
+    assert KeyPair is not None
+    assert DeviceFingerprint is not None
+
+
 def test_import_all():
     """Test that all modules can be imported together."""
     import fleetctl
